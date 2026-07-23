@@ -39,7 +39,7 @@ export const BUILTIN_CHAINS: readonly ChainDefinition[] = [
     name: "Base",
     chainReference: "8453",
     nativeCurrencySymbol: "ETH",
-    defaultRpcUrl: "https://mainnet.base.org",
+    defaultRpcUrl: "https://base-rpc.publicnode.com",
     explorerUrl: "https://basescan.org",
     builtin: true
   },

@@ -22,6 +22,12 @@ describe("chain provider health", () => {
     );
   });
 
+  it("uses a keyless Base default that does not require an operator account", () => {
+    expect(BUILTIN_CHAINS.find(({ id }) => id === "base")?.defaultRpcUrl).toBe(
+      "https://base-rpc.publicnode.com"
+    );
+  });
+
   it("accepts an EVM provider only when its chain ID matches", async () => {
     const healthy = await checkChainProvider(
       chain(),
