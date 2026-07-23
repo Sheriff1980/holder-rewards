@@ -128,6 +128,9 @@ describe("Cloudflare Worker", () => {
     expect(html).toContain("Add a holder role");
     expect(html).toContain("Active holder roles");
     expect(html).toContain("Solana token or NFT mint");
+    expect(html).toContain('typeInput.value = "spl-token"');
+    expect(html).toContain('typeInput.value = "erc721"');
+    expect(html).toContain('chainInput.addEventListener("change", syncRequirementForNetwork)');
     expect(html).toContain("Any requirement");
     expect(html).toContain("All requirements");
     expect(html).toContain("Advanced network settings");

@@ -642,17 +642,26 @@ export function managerPage(env: Env): string {
         document.getElementById("trait-value").required = !traitFields.hidden;
         document.getElementById("minimum").required = !minimumFields.hidden;
         document.getElementById("asset-address-label").textContent = type === "spl-token" ? "Token or NFT mint address" : "Contract address";
-        if (data && data.chains) {
-          const family = type === "spl-token" ? "solana" : "evm";
-          for (const option of chainInput.options) {
-            const chain = data.chains.find((item) => item.id === option.value);
-            option.disabled = !chain || chain.family !== family;
-          }
-          if (chainInput.selectedOptions[0] && chainInput.selectedOptions[0].disabled) {
-            const available = Array.from(chainInput.options).find((option) => !option.disabled);
-            if (available) chainInput.value = available.value;
-          }
+      }
+
+      function syncNetworkForRequirement() {
+        const family = typeInput.value === "spl-token" ? "solana" : "evm";
+        const selected = data && data.chains.find((chain) => chain.id === chainInput.value);
+        if (!selected || selected.family !== family) {
+          const compatible = data && data.chains.find((chain) => chain.family === family);
+          if (compatible) chainInput.value = compatible.id;
         }
+        updateFields();
+      }
+
+      function syncRequirementForNetwork() {
+        const selected = data && data.chains.find((chain) => chain.id === chainInput.value);
+        if (selected && selected.family === "solana") {
+          typeInput.value = "spl-token";
+        } else if (selected && selected.family === "evm" && typeInput.value === "spl-token") {
+          typeInput.value = "erc721";
+        }
+        updateFields();
       }
 
       function syncMatchModeForRole() {
@@ -792,7 +801,8 @@ export function managerPage(env: Env): string {
         }
       }
 
-      typeInput.addEventListener("change", updateFields);
+      typeInput.addEventListener("change", syncNetworkForRequirement);
+      chainInput.addEventListener("change", syncRequirementForNetwork);
       roleInput.addEventListener("change", syncMatchModeForRole);
       retryProviderHealth.addEventListener("click", loadProviderHealth);
       retrySyncProblems.addEventListener("click", async () => {
