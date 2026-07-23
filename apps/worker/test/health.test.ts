@@ -18,7 +18,7 @@ function chain(overrides: Partial<ChainDefinition> = {}): ChainDefinition {
 describe("chain provider health", () => {
   it("uses a keyless Solana default that supports ownership lookups", () => {
     expect(BUILTIN_CHAINS.find(({ id }) => id === "solana")?.defaultRpcUrl).toBe(
-      "https://api.mainnet-beta.solana.com"
+      "https://public.rpc.solanavibestation.com"
     );
   });
 

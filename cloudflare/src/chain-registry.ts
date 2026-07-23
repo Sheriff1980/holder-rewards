@@ -79,7 +79,7 @@ export const BUILTIN_CHAINS: readonly ChainDefinition[] = [
     name: "Solana",
     chainReference: "mainnet-beta",
     nativeCurrencySymbol: "SOL",
-    defaultRpcUrl: "https://api.mainnet-beta.solana.com",
+    defaultRpcUrl: "https://public.rpc.solanavibestation.com",
     explorerUrl: "https://explorer.solana.com",
     builtin: true
   },
