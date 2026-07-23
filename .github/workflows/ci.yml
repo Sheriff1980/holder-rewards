@@ -48,5 +48,5 @@ jobs:
       - name: Verify standalone Cloudflare release
         run: pnpm check:cloudflare-release
 
-      - name: Smoke test a clean one-click release
+      - name: Smoke test a clean deployment template
         run: pnpm smoke:cloudflare-release

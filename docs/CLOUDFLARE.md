@@ -13,9 +13,9 @@ The repository already declares:
 - The required Discord bot-token secret.
 - Rolling scheduled role revalidation.
 - D1 migrations in `migrations/`.
-- A deployment command that applies migrations before deploying.
+- A deployment command that provisions D1, securely installs the runtime bot-token secret, and then applies migrations.
 
-Cloudflare's Deploy button can provision the declared D1 database and prompt for the required secrets when the repository is public.
+Operators first create a populated private repository from the official GitHub template. They then authorize Cloudflare for only that repository and import it through Workers Builds.
 
 ## Discord Values
 
@@ -60,8 +60,9 @@ pnpm build
 
 ## Publishing Checklist
 
-- Replace the placeholder repository URL in the README with the permanent public GitHub URL.
-- Add the official Deploy to Cloudflare button.
+- Keep the public `holder-rewards-cloudflare` template synchronized with each release.
+- Verify that a new private repository can be generated from the template.
+- Verify Cloudflare can be authorized for only the generated repository.
 - Enable GitHub private vulnerability reporting.
 - Configure release builds and dependency updates.
 - Test a clean deployment in a new Cloudflare account.

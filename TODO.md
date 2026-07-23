@@ -29,7 +29,7 @@ The safest clone should start with verification and role sync, then add points a
 
 ### Core Principle
 
-This should be a self-hostable, open-source alternative to paid third-party Discord verification/rewards platforms. A normal project owner should click a hosted deploy button, provide only required platform credentials, open the generated app, and add the bot to Discord. Cloning the repository, editing environment files, and running setup commands are optional advanced developer paths, not the product's default experience.
+This should be a self-hostable, open-source alternative to paid third-party Discord verification/rewards platforms. A normal project owner should create a populated private repository from the official template, grant the host access to only that repository, provide only required platform credentials, open the generated app, and add the bot to Discord. Cloning repositories, editing files, granting access to unrelated repositories, and running setup commands are product defects in the ordinary path.
 
 ### MVP
 
@@ -77,7 +77,7 @@ This should be a self-hostable, open-source alternative to paid third-party Disc
   - [x] `packages/db` for schema and migrations.
   - [x] `packages/chains` for ownership adapters.
   - [x] `packages/core` for rewards and rule evaluation.
-- [x] Choose databases: D1 for one-click hosting; Postgres for advanced deployments.
+- [x] Choose databases: D1 for browser-only hosting; Postgres for advanced deployments.
 - [x] Choose the initial hosted scheduler: Cloudflare Cron Triggers.
 - [ ] Add Cloudflare Queues when ownership sync jobs are implemented.
 - [x] Define a chain adapter interface:
@@ -207,7 +207,7 @@ This should be a self-hostable, open-source alternative to paid third-party Disc
 - [x] Pick license: MIT.
 - [x] Add the full license text in `LICENSE`.
 - [x] Write `README.md` with what this project is and is not.
-- [x] Add `.env.docker.example` for the advanced Docker path without polluting one-click Worker secrets.
+- [x] Add `.env.docker.example` for the advanced Docker path without polluting hosted Worker secrets.
 - [x] Add initial `README.md` with what this project is and is not.
 - [x] Declare required Cloudflare secrets and validate Node environment variables at startup.
 - [x] Add initial runtime startup checks that explain missing/invalid environment variables in plain English.
@@ -238,8 +238,8 @@ This should be a self-hostable, open-source alternative to paid third-party Disc
   - [ ] Chain/indexer provider keys.
   - [x] Advanced custom EVM networks are managed through the private Discord manager; no extra setup secret is required.
 - [x] Keep secrets only in environment variables or secret managers.
-- [x] Add one-click-host configuration with automatic D1 provisioning and migrations.
-- [x] Add the live Deploy to Cloudflare button after the permanent GitHub URL exists.
+- [x] Add browser-host configuration with automatic D1 provisioning and migrations.
+- [x] Replace the broad-access Deploy button with a least-privilege GitHub-template-first flow.
 - [x] Provide `.env.docker.example` with every advanced Docker variable documented.
 - [x] Provide `.dev.vars.example` for local Cloudflare development.
 - [x] Provide `docker-compose.yml` for local and small production deployments.

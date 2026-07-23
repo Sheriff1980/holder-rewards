@@ -6,7 +6,8 @@ The default user is a nontechnical Discord community operator who wants to self-
 
 ## Non-Negotiable Operability
 
-- The recommended path must be hosted, one-click, and usable without installing local software.
+- The recommended path must be hosted, browser-only, least-privilege, and usable without installing local software.
+- A complete populated GitHub repository must exist before Cloudflare is connected. Never ask for access to unrelated repositories or use a temporary repository as an authorization workaround.
 - Ask only for credentials or consent that an external platform truly requires. Automate everything else.
 - Provision databases, apply migrations, configure endpoints, register commands, schedule jobs, and perform upgrades automatically.
 - Do not turn implementation details into user steps. Manual command registration, copying callback URLs, editing files, and routine CLI commands are product defects unless the external platform makes them unavoidable.

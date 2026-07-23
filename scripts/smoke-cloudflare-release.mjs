@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -51,6 +51,10 @@ try {
     filter: (path) =>
       !["node_modules", "dist", ".wrangler", ".dev.vars"].includes(path.split(/[\\/]/).at(-1))
   });
+  const wranglerConfig = await readFile(join(app, "wrangler.jsonc"), "utf8");
+  if (wranglerConfig.includes("database_id") || wranglerConfig.includes("00000000-0000")) {
+    throw new Error("The deployment template still requires a manually created D1 database.");
+  }
   if (!pnpmScript) throw new Error("Run this smoke test through pnpm.");
   run(process.execPath, [pnpmScript, "install", "--ignore-workspace", "--frozen-lockfile"], app);
   await writeFile(join(app, ".dev.vars"), 'DISCORD_BOT_TOKEN="release-smoke-token"\n', "utf8");

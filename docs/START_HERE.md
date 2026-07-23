@@ -7,7 +7,7 @@ This is the complete setup and first-test guide. Follow it from top to bottom in
 Have these ready:
 
 - A Discord account that has **Manage Server** permission in the server you will test.
-- A free GitHub account. Cloudflare uses it to create your own copy of the app.
+- A free GitHub account. You will use it to create your own private copy of the complete app before connecting Cloudflare.
 - A free Cloudflare account.
 - One NFT or token contract you can test and a wallet that owns the required asset.
 - A private place, such as a password manager, to hold the Discord bot token briefly.
@@ -69,24 +69,49 @@ You should get a prompt at the bottom of the page to save. Do it. Discord may pr
 
 Discord normally shows a token only once. If it is lost, reset it again. Resetting immediately invalidates the old token.
 
-## 6. Deploy Your Copy
+## 6. Create Your Private App Repository
 
-1. Select the button below.
+An empty GitHub repository cannot run Holder Rewards. The official template creates a private repository that already contains the Worker, database migrations, and deployment automation.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Sheriff1980/holder-rewards/tree/main/cloudflare)
+1. Open the [Holder Rewards Cloudflare template](https://github.com/Sheriff1980/holder-rewards-cloudflare).
+2. Select **Use this template**.
+3. Select **Create a new repository**.
+4. Under **Owner**, choose the GitHub account that will own this community deployment.
+5. Under **Repository name**, enter `holder-rewards`.
+6. Under **Visibility**, select **Private**.
+7. Leave **Include all branches** off.
+8. Select **Create repository from template**.
+9. Wait until GitHub opens the new repository.
+10. Confirm it contains `src`, `migrations`, `scripts`, `package.json`, and `wrangler.jsonc`.
 
-2. Sign in to Cloudflare if asked.
-3. Authorize Cloudflare to use GitHub if asked. Cloudflare needs this to create your own Holder Rewards repository and deploy updates from it.
-4. On the deployment page, keep the suggested repository name, Worker name, build command, and deploy command.
-5. When Cloudflare asks for `DISCORD_BOT_TOKEN`, paste the token from Step 5.
-6. Do not add quotes or spaces before or after the token.
-7. Select **Deploy**.
-8. Wait until both the build and deployment show success. The first deployment also creates the database and applies every migration automatically.
-9. Open the `workers.dev` address shown by Cloudflare.
+Do not create an empty repository and do not fork the development repository. The template supplies the complete deployable application without Git, cloning, or a terminal.
 
-If Cloudflare reports a failed build, select **Retry deployment** once. If it fails again, read the first red error line. Do not create a database, edit a command, or copy a URL manually.
+## 7. Connect Only This Repository To Cloudflare
 
-## 7. Finish The Automatic Launch Check
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com/).
+2. Open **Workers & Pages**.
+3. Select **Create application**.
+4. Choose the option to import an existing Git repository.
+5. Select **New GitHub connection** if this is the first Worker connected to this GitHub account.
+6. On GitHub, choose **Only select repositories**.
+7. Select only the private `holder-rewards` repository created in Step 6.
+8. Install or authorize **Cloudflare Workers & Pages**.
+9. Return to Cloudflare and select the `holder-rewards` repository.
+10. Keep `main` as the production branch.
+11. Use `pnpm run build` as the build command.
+12. Use `pnpm run deploy` as the deploy command.
+13. Keep non-production branch builds off.
+14. Under the build variables and secrets, add a secret named `DISCORD_BOT_TOKEN`.
+15. Paste the token from Step 5 as its value. Do not add quotes or spaces.
+16. Save and deploy.
+17. Wait until both the build and deployment show success.
+18. Open the `workers.dev` address shown by Cloudflare.
+
+The deployment securely installs the bot token as an encrypted Worker secret, provisions D1, and applies every database migration. Cloudflare does not need access to any other GitHub repository.
+
+If Cloudflare reports a failed build, select **Retry deployment** once. If it fails again, read the first red error line. Do not create a database, edit a command, or copy a database ID manually.
+
+## 8. Finish The Automatic Launch Check
 
 The Holder Rewards setup page opens at your new `workers.dev` address.
 
@@ -98,7 +123,7 @@ The Holder Rewards setup page opens at your new `workers.dev` address.
 
 Holder Rewards automatically discovers the Discord Application ID and Public Key, sets the Interactions Endpoint URL, and publishes the slash commands. There is no command-registration step.
 
-## 8. Add The Bot To Your Server
+## 9. Add The Bot To Your Server
 
 1. On the setup page, select **Add bot to Discord**.
 2. In Discord's **Add to Server** list, choose the server you will test.
@@ -110,7 +135,7 @@ Holder Rewards automatically discovers the Discord Application ID and Public Key
 5. Select **Authorize**.
 6. Complete Discord's human check if shown.
 
-## 9. Put The Bot Above Holder Roles
+## 10. Put The Bot Above Holder Roles
 
 Discord only allows a bot to manage roles below its own role.
 
@@ -123,7 +148,7 @@ Discord only allows a bot to manage roles below its own role.
 
 Do not place the bot above owner, administrator, or staff roles it does not need to manage.
 
-## 10. Open The Private Manager
+## 11. Open The Private Manager
 
 1. Return to a channel in the Discord server.
 2. Enter `/rules manage`.
@@ -133,7 +158,7 @@ Do not place the bot above owner, administrator, or staff roles it does not need
 
 The private manager link expires. Run `/rules manage` again whenever you need a new one.
 
-## 11. Create Your First Holder Rule
+## 12. Create Your First Holder Rule
 
 Before continuing, create an ordinary Discord role such as `Verified Holder` if the server does not already have one. Keep it below the bot's role.
 
@@ -157,7 +182,7 @@ In the private manager:
 
 Contract addresses and mint addresses are public identifiers, not secret keys. Never paste a wallet seed phrase or private key.
 
-## 12. Post The Verification Panel
+## 13. Post The Verification Panel
 
 1. In the Discord channel where members should verify, enter `/verify panel`.
 2. Send the command.
@@ -165,7 +190,7 @@ Contract addresses and mint addresses are public identifiers, not secret keys. N
 
 Only a server manager can post this panel. Members can use the button but cannot configure rules.
 
-## 13. Prove Wallet Ownership
+## 14. Prove Wallet Ownership
 
 Test this yourself before inviting members:
 
@@ -188,7 +213,7 @@ After signing:
 3. Return to Discord and confirm the expected holder role appears on your member.
 4. Run `/verify status` to see your linked-wallet status.
 
-## 14. Test Role Removal
+## 15. Test Role Removal
 
 This proves the bot does more than grant a role once.
 
@@ -206,7 +231,7 @@ To test an unqualified wallet too, open the verification panel as a second Disco
 
 Automatic rechecks run throughout the day. The manager overview shows failures and provides **Retry problem members** when a provider or Discord has a temporary problem.
 
-## 15. Test Community Rewards
+## 16. Test Community Rewards
 
 1. In `/rules manage`, set the currency name and daily reward.
 2. Optionally upload a currency image.
@@ -217,7 +242,7 @@ Automatic rechecks run throughout the day. The manager overview shows failures a
 7. As a manager, test `/points grant` with a small amount and reason.
 8. Confirm the new balance and manager activity appear in the private manager.
 
-## 16. Customize And Export
+## 17. Customize And Export
 
 In `/rules manage`, you can:
 
@@ -230,7 +255,7 @@ In `/rules manage`, you can:
 
 Wallet exports shorten addresses by default. Turn on full-address exports only when your community actually needs them.
 
-## 17. Your Setup Is Complete
+## 18. Your Setup Is Complete
 
 A complete first test has all of these results:
 
@@ -247,7 +272,7 @@ A complete first test has all of these results:
 - Points claim, balance, leaderboard, and manager grant work.
 - Manager CSV exports download.
 
-Keep the GitHub repository Cloudflare created. It is your open-source copy and is also how Cloudflare receives automatic application updates.
+Keep the private GitHub repository you created from the template. It is your community's open-source copy and is also how Cloudflare receives automatic application updates.
 
 ## Common Problems
 

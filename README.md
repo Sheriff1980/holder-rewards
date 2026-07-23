@@ -50,15 +50,15 @@ EVM wallet linking supports EIP-6963 multi-wallet discovery, provider-neutral mo
 
 ## Deployment Choices
 
-### One-Click Cloudflare
+### Browser-Only Cloudflare
 
 This is the recommended path for nontechnical operators. It does not require Docker, Node.js, a database installation, a domain, or a computer that remains online.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Sheriff1980/holder-rewards/tree/main/cloudflare)
+[Create your private Holder Rewards repository](https://github.com/Sheriff1980/holder-rewards-cloudflare/generate)
 
-Cloudflare clones the standalone app into the operator's GitHub account, provisions D1, requests the bot token, runs migrations, and deploys the Worker.
+GitHub creates a fully populated private repository from the official template. The operator then grants Cloudflare access to only that repository. Cloudflare provisions D1, securely installs the bot token, runs migrations, and deploys the Worker.
 
-The only required secret is:
+The only required build secret is:
 
 - `DISCORD_BOT_TOKEN`
 
@@ -76,7 +76,7 @@ See [community points](docs/POINTS.md) for daily claims, balances, and ledger be
 See [customization](docs/CUSTOMIZATION.md) for community branding and image storage.
 See [updates and recovery](docs/UPGRADES_AND_RECOVERY.md) for D1 migrations, backups, exports, and point-in-time restore.
 
-The [Cloudflare release notes](docs/CLOUDFLARE.md) are for project developers preparing the public deployment button. They are not operator setup instructions.
+The [Cloudflare release notes](docs/CLOUDFLARE.md) are for project developers maintaining the public deployment template. They are not operator setup instructions.
 
 ### Docker Development Scaffold
 
@@ -87,7 +87,7 @@ cp .env.docker.example .env
 docker compose up --build
 ```
 
-This is an unfinished developer scaffold for future persistent Discord Gateway features. It is not a supported production deployment path. Use the one-click Cloudflare edition for the working holder-verification and rewards framework.
+This is an unfinished developer scaffold for future persistent Discord Gateway features. It is not a supported production deployment path. Use the browser-only Cloudflare template for the working holder-verification and rewards framework.
 
 ### Local Development
 

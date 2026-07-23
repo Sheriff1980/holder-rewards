@@ -2,7 +2,7 @@
 
 ## Ordinary Updates
 
-The hosted Cloudflare deployment applies new D1 migrations before deploying the new Worker. An operator using the recommended GitHub-to-Cloudflare path should only need to redeploy the newer project version. Do not edit or rerun old migration files; D1 records completed files in its `d1_migrations` table and applies only new ones in order.
+The hosted Cloudflare deployment applies new D1 migrations automatically as part of each deployment. An operator using the recommended GitHub-to-Cloudflare path does not run migration commands. Do not edit or rerun old migration files; D1 records completed files in its `d1_migrations` table and applies only new ones in order.
 
 Before a significant update, confirm the current deployment is healthy and note the current D1 recovery bookmark. The commands below are for an advanced operator or a helper; ordinary Discord managers do not need a terminal for day-to-day use.
 

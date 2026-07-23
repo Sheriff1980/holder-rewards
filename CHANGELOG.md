@@ -4,6 +4,17 @@ All notable changes to Holder Rewards will be documented here. The project follo
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-23
+
+### Changed
+
+- Replaced the Cloudflare clone-based deploy button with a GitHub-template-first flow so operators can grant Cloudflare access to only their Holder Rewards repository.
+- Standalone deployment now provisions D1 before applying migrations and securely promotes the Discord token from a Cloudflare build secret to an encrypted Worker runtime secret.
+
+### Security
+
+- Ordinary setup no longer asks the Cloudflare GitHub App for access to every existing and future repository.
+
 ## 0.1.1 - 2026-07-23
 
 ### Fixed
