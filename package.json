@@ -16,7 +16,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "build:cloudflare-release": "node scripts/sync-cloudflare-release.mjs --write && pnpm --dir cloudflare build",
-    "check:cloudflare-release": "node scripts/sync-cloudflare-release.mjs --check && pnpm --dir cloudflare typecheck && pnpm --dir cloudflare build",
+    "check:cloudflare-release": "node scripts/sync-cloudflare-release.mjs --check && pnpm --dir cloudflare install --ignore-workspace --frozen-lockfile && pnpm --dir cloudflare typecheck && pnpm --dir cloudflare build",
     "smoke:cloudflare-release": "node scripts/smoke-cloudflare-release.mjs",
     "deploy": "pnpm --filter @holder-rewards/chains build && pnpm db:migrate:cloudflare && wrangler deploy",
     "dev": "pnpm -r --parallel dev",

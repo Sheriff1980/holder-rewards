@@ -10,6 +10,7 @@ All notable changes to Holder Rewards will be documented here. The project follo
 
 - Clean-checkout workspace lint and type resolution no longer depend on generated `dist` files.
 - Worker tests build their internal runtime dependency instead of relying on stale local build output.
+- Standalone release verification installs the Cloudflare package's own locked dependencies before checking it.
 
 ### Verified
 
