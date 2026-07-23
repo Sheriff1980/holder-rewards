@@ -36,6 +36,7 @@ try {
     env: {
       ...process.env,
       DISCORD_BOT_TOKEN: token,
+      WRANGLER_CI_OVERRIDE_NAME: "holder-rewards-test",
       HOLDER_REWARDS_WRANGLER_SCRIPT: fakeWrangler,
       HOLDER_REWARDS_CALL_LOG: callLog
     }
@@ -57,8 +58,8 @@ try {
   if (calls[0].args[0] !== "deploy" || !calls[0].args.includes("--secrets-file")) {
     throw new Error("The Worker was not deployed with a secrets file first.");
   }
-  if (calls[1].args.join(" ") !== "d1 migrations apply DB --remote") {
-    throw new Error("D1 migrations did not run after deployment.");
+  if (calls[1].args.join(" ") !== "d1 migrations apply holder-rewards-test-db --remote") {
+    throw new Error("D1 migrations did not target the database created for the connected Worker.");
   }
 
   try {

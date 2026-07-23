@@ -9,6 +9,9 @@ const token = process.env.DISCORD_BOT_TOKEN;
 const wranglerScript =
   process.env.HOLDER_REWARDS_WRANGLER_SCRIPT ??
   join(root, "node_modules", "wrangler", "bin", "wrangler.js");
+const databaseTarget = process.env.WRANGLER_CI_OVERRIDE_NAME
+  ? `${process.env.WRANGLER_CI_OVERRIDE_NAME}-db`
+  : "DB";
 
 if (!token) {
   throw new Error(
@@ -43,7 +46,7 @@ try {
 
   // The first deploy provisions D1 and installs the encrypted runtime secret.
   runWrangler(["deploy", "--secrets-file", secretsFile]);
-  runWrangler(["d1", "migrations", "apply", "DB", "--remote"]);
+  runWrangler(["d1", "migrations", "apply", databaseTarget, "--remote"]);
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });
 }
