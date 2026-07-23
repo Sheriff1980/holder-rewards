@@ -15,6 +15,7 @@ await writeFile(
   `import { appendFile, readFile } from "node:fs/promises";
 const args = process.argv.slice(2);
 let secretPath;
+let migrationsConfig;
 if (args[0] === "deploy") {
   const index = args.indexOf("--secrets-file");
   if (index === -1) throw new Error("Missing --secrets-file.");
@@ -24,7 +25,15 @@ if (args[0] === "deploy") {
     throw new Error("The deploy secret did not match the build secret.");
   }
 }
-await appendFile(process.env.HOLDER_REWARDS_CALL_LOG, JSON.stringify({ args, secretPath }) + "\\n");
+if (args[0] === "d1") {
+  const index = args.indexOf("--config");
+  if (index === -1) throw new Error("Missing migration config.");
+  migrationsConfig = JSON.parse(await readFile(args[index + 1], "utf8"));
+}
+await appendFile(
+  process.env.HOLDER_REWARDS_CALL_LOG,
+  JSON.stringify({ args, secretPath, migrationsConfig }) + "\\n"
+);
 `,
   "utf8"
 );
@@ -58,8 +67,19 @@ try {
   if (calls[0].args[0] !== "deploy" || !calls[0].args.includes("--secrets-file")) {
     throw new Error("The Worker was not deployed with a secrets file first.");
   }
-  if (calls[1].args.join(" ") !== "d1 migrations apply holder-rewards-test-db --remote") {
-    throw new Error("D1 migrations did not target the database created for the connected Worker.");
+  if (
+    calls[1].args.slice(0, 4).join(" ") !== "d1 migrations apply DB" ||
+    !calls[1].args.includes("--remote")
+  ) {
+    throw new Error("D1 migrations were not applied remotely through the DB binding.");
+  }
+  if (
+    calls[1].migrationsConfig?.name !== "holder-rewards-test" ||
+    calls[1].migrationsConfig?.d1_databases?.[0]?.binding !== "DB" ||
+    calls[1].migrationsConfig?.d1_databases?.[0]?.database_name !==
+      "holder-rewards-test-db"
+  ) {
+    throw new Error("The migration config did not target the connected Worker's database.");
   }
 
   try {

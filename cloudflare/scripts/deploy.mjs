@@ -37,6 +37,7 @@ function runWrangler(args) {
 
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "holder-rewards-deploy-"));
 const secretsFile = join(temporaryDirectory, "secrets.json");
+const migrationsConfigFile = join(temporaryDirectory, "wrangler-migrations.json");
 
 try {
   await writeFile(secretsFile, JSON.stringify({ DISCORD_BOT_TOKEN: token }), {
@@ -46,7 +47,33 @@ try {
 
   // The first deploy provisions D1 and installs the encrypted runtime secret.
   runWrangler(["deploy", "--secrets-file", secretsFile]);
-  runWrangler(["d1", "migrations", "apply", databaseTarget, "--remote"]);
+  if (process.env.WRANGLER_CI_OVERRIDE_NAME) {
+    await writeFile(
+      migrationsConfigFile,
+      JSON.stringify({
+        name: process.env.WRANGLER_CI_OVERRIDE_NAME,
+        d1_databases: [
+          {
+            binding: "DB",
+            database_name: databaseTarget,
+            migrations_dir: join(root, "migrations")
+          }
+        ]
+      }),
+      "utf8"
+    );
+    runWrangler([
+      "d1",
+      "migrations",
+      "apply",
+      "DB",
+      "--config",
+      migrationsConfigFile,
+      "--remote"
+    ]);
+  } else {
+    runWrangler(["d1", "migrations", "apply", "DB", "--remote"]);
+  }
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });
 }
