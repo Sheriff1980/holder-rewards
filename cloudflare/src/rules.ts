@@ -15,6 +15,7 @@ import { listChains } from "./chains.js";
 import type { Env } from "./types.js";
 import { loadTokenAttributes, metadataHasTrait } from "./metadata.js";
 import { isSolanaAddress, solanaTokenQualifies } from "./solana.js";
+import { accrueDailyHolderPoints } from "./points.js";
 
 const MAX_TRAIT_NFT_SCAN = 15;
 const TRAIT_SCAN_BATCH = 5;
@@ -66,6 +67,7 @@ export type RoleRuleRecord = {
   roleId: string;
   chainId: string;
   matchMode: RuleMatchMode;
+  rewardMultiplier: number;
   definition: RoleRuleDefinition;
 };
 
@@ -75,6 +77,7 @@ type RoleRuleRow = {
   role_id: string;
   chain: string;
   match_mode: string;
+  reward_multiplier?: number;
   rule: string;
 };
 
@@ -187,6 +190,7 @@ function parseStoredRule(row: RoleRuleRow): RoleRuleRecord | null {
         roleId: row.role_id,
         chainId: row.chain,
         matchMode: row.match_mode === "all" ? "all" : "any",
+        rewardMultiplier: Number.isSafeInteger(row.reward_multiplier) ? Number(row.reward_multiplier) : 1,
         definition: definition as SolanaRoleRule
       };
     }
@@ -241,6 +245,7 @@ function parseStoredRule(row: RoleRuleRow): RoleRuleRecord | null {
       roleId: row.role_id,
       chainId: row.chain,
       matchMode: row.match_mode === "all" ? "all" : "any",
+      rewardMultiplier: Number.isSafeInteger(row.reward_multiplier) ? Number(row.reward_multiplier) : 1,
       definition: definition as EvmRoleRule
     };
   } catch {
@@ -275,6 +280,7 @@ export async function addRoleRule(
     traitValue?: unknown;
     tokenId?: unknown;
     matchMode?: unknown;
+    rewardMultiplier?: unknown;
   }
 ): Promise<RoleRuleRecord> {
   const guildId = requireSnowflake(input.guildId, "Server");
@@ -289,16 +295,22 @@ export async function addRoleRule(
   if (!chain.defaultRpcUrl) {
     throw new RuleError("That chain needs a public RPC URL before ownership rules can use it.");
   }
-  const existingMode = await env.DB.prepare(
-    "SELECT match_mode FROM role_rules WHERE guild_id = ? AND role_id = ? AND enabled = 1 LIMIT 1"
+  const existingRoleSettings = await env.DB.prepare(
+    "SELECT match_mode, reward_multiplier FROM role_rules WHERE guild_id = ? AND role_id = ? AND enabled = 1 LIMIT 1"
   )
     .bind(guildId, roleId)
-    .first<{ match_mode: string }>();
+    .first<{ match_mode: string; reward_multiplier: number }>();
   const matchMode = input.matchMode === undefined || input.matchMode === null || input.matchMode === ""
-    ? existingMode?.match_mode === "all" ? "all" : "any"
+    ? existingRoleSettings?.match_mode === "all" ? "all" : "any"
     : input.matchMode;
   if (matchMode !== "any" && matchMode !== "all") {
     throw new RuleError("Choose whether any or all requirements are needed for this role.");
+  }
+  const rewardMultiplier = input.rewardMultiplier === undefined || input.rewardMultiplier === null || input.rewardMultiplier === ""
+    ? existingRoleSettings?.reward_multiplier ?? 1
+    : Number(input.rewardMultiplier);
+  if (!Number.isSafeInteger(rewardMultiplier) || rewardMultiplier < 1 || rewardMultiplier > 100) {
+    throw new RuleError("Reward multiplier must be a whole number between 1 and 100.");
   }
 
   let definition: RoleRuleDefinition;
@@ -381,19 +393,22 @@ export async function addRoleRule(
       "INSERT INTO guilds (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
     ).bind(guildId),
     env.DB.prepare(
-      "UPDATE role_rules SET match_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND role_id = ? AND enabled = 1"
-    ).bind(matchMode, guildId, roleId),
+      "UPDATE role_rules SET match_mode = ?, reward_multiplier = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND role_id = ? AND enabled = 1"
+    ).bind(matchMode, rewardMultiplier, guildId, roleId),
     env.DB.prepare(
-      "INSERT INTO role_rules (id, guild_id, role_id, chain, match_mode, rule) VALUES (?, ?, ?, ?, ?, ?)"
-    ).bind(id, guildId, roleId, chain.id, matchMode, JSON.stringify(definition))
+      `INSERT INTO role_rules
+        (id, guild_id, role_id, chain, match_mode, reward_multiplier, rule)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, guildId, roleId, chain.id, matchMode, rewardMultiplier, JSON.stringify(definition))
   ]);
 
-  return { id, guildId, roleId, chainId: chain.id, matchMode, definition };
+  return { id, guildId, roleId, chainId: chain.id, matchMode, rewardMultiplier, definition };
 }
 
 export async function listRoleRules(env: Env, guildId: string): Promise<RoleRuleRecord[]> {
   const rows = await env.DB.prepare(
-    "SELECT id, guild_id, role_id, chain, match_mode, rule FROM role_rules WHERE guild_id = ? AND enabled = 1 ORDER BY created_at"
+    `SELECT id, guild_id, role_id, chain, match_mode, reward_multiplier, rule
+     FROM role_rules WHERE guild_id = ? AND enabled = 1 ORDER BY created_at`
   )
     .bind(guildId)
     .all<RoleRuleRow>();
@@ -441,6 +456,31 @@ export async function updateRoleMatchMode(
     throw new RuleError("That role has no active holder requirements.", 404);
   }
   return matchModeInput;
+}
+
+export async function updateRoleRewardMultiplier(
+  env: Env,
+  guildIdInput: unknown,
+  roleIdInput: unknown,
+  multiplierInput: unknown
+): Promise<number> {
+  const guildId = requireSnowflake(guildIdInput, "Server");
+  const roleId = requireSnowflake(roleIdInput, "Role");
+  const multiplier = Number(multiplierInput);
+  if (!Number.isSafeInteger(multiplier) || multiplier < 1 || multiplier > 100) {
+    throw new RuleError("Reward multiplier must be a whole number between 1 and 100.");
+  }
+  const result = await env.DB.prepare(
+    `UPDATE role_rules
+     SET reward_multiplier = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE guild_id = ? AND role_id = ? AND enabled = 1`
+  )
+    .bind(multiplier, guildId, roleId)
+    .run();
+  if ((result.meta.changes ?? 0) === 0) {
+    throw new RuleError("That role has no active holder requirements.", 404);
+  }
+  return multiplier;
 }
 
 export async function removeRoleRule(env: Env, guildId: string, ruleId: string): Promise<boolean> {
@@ -830,7 +870,7 @@ export async function syncMemberRoles(
     const qualifies = matchMode === "all"
       ? group.length > 0 && group.every((outcome) => outcome.qualifies === true)
       : group.some((outcome) => outcome.qualifies === true);
-    if (qualifies || (decision === "error" && hasRole)) {
+    if (qualifies) {
       summary.qualified.push(roleId);
     }
     if (decision === "error") {
@@ -864,6 +904,9 @@ export async function syncMemberRoles(
         message: error instanceof Error ? error.message : "Discord role update failed."
       });
     }
+  }
+  if (summary.qualified.length > 0) {
+    await accrueDailyHolderPoints(env, guildId, discordUserId, summary.qualified);
   }
   return summary;
 }

@@ -4,6 +4,7 @@ import type { DiscordInteraction, Env } from "../src/types.js";
 
 const mocks = vi.hoisted(() => ({
   addRoleRule: vi.fn(),
+  auditPointsLedger: vi.fn(),
   claimDailyPoints: vi.fn(),
   createAdminSession: vi.fn(),
   createVerificationSession: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("../src/rules.js", () => ({
   updateRoleMatchMode: mocks.updateRoleMatchMode
 }));
 vi.mock("../src/points.js", () => ({
+  auditPointsLedger: mocks.auditPointsLedger,
   claimDailyPoints: mocks.claimDailyPoints,
   getPointsBalance: mocks.getPointsBalance,
   getPointsLeaderboard: mocks.getPointsLeaderboard,
@@ -145,6 +147,22 @@ function pointsClaimInteraction(id: string): DiscordInteraction {
   };
 }
 
+function pointsAuditInteraction(id: string): DiscordInteraction {
+  return {
+    id,
+    type: 2,
+    guild_id: "123456789012345678",
+    member: {
+      permissions: String(1n << 5n),
+      user: { id: "223456789012345678" }
+    },
+    data: {
+      name: "points",
+      options: [{ name: "audit", type: 1 }]
+    }
+  };
+}
+
 function addRuleInteraction(id: string, roleId = "423456789012345678"): DiscordInteraction {
   return {
     id,
@@ -199,6 +217,16 @@ beforeEach(() => {
     amount: 10,
     balance: 10,
     currencyName: "Points"
+  });
+  mocks.auditPointsLedger.mockResolvedValue({
+    transactionCount: 4,
+    memberCount: 2,
+    netPoints: 55
+  });
+  mocks.getRewardSettings.mockResolvedValue({
+    currencyName: "Points",
+    dailyClaimAmount: 10,
+    holderDailyAmount: 5
   });
 });
 
@@ -291,6 +319,39 @@ describe("Discord interaction safety", () => {
 
     expect(await responseContent(response)).toContain("Link a qualifying wallet");
     expect(mocks.claimDailyPoints).not.toHaveBeenCalled();
+  });
+
+  it("does not consume a daily claim when ownership confirmation fails", async () => {
+    mocks.syncMemberRoles.mockResolvedValue({
+      added: [],
+      removed: [],
+      unchanged: ["423456789012345678"],
+      qualified: [],
+      errors: [{ roleId: "423456789012345678", message: "RPC timeout" }]
+    });
+
+    const response = await handleDiscordInteraction(
+      pointsClaimInteraction("563456789012345678"),
+      new URL("https://holder.example/interactions"),
+      createEnv()
+    );
+
+    expect(await responseContent(response)).toContain("could not be confirmed");
+    expect(mocks.claimDailyPoints).not.toHaveBeenCalled();
+  });
+
+  it("lets a server manager recalculate the rewards ledger", async () => {
+    const response = await handleDiscordInteraction(
+      pointsAuditInteraction("573456789012345678"),
+      new URL("https://holder.example/interactions"),
+      createEnv()
+    );
+
+    expect(await responseContent(response)).toContain("4 transactions, 2 members, 55 net points");
+    expect(mocks.auditPointsLedger).toHaveBeenCalledWith(
+      expect.anything(),
+      "123456789012345678"
+    );
   });
 
   it("executes duplicate slash-command rule creation only once", async () => {

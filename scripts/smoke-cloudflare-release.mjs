@@ -93,7 +93,7 @@ try {
   }
 
   process.stdout.write(
-    "Standalone Cloudflare release passed clean install, 17 migrations, boot, health, setup-page, and chain-registry checks.\n"
+    "Standalone Cloudflare release passed clean install, 18 migrations, boot, health, setup-page, and chain-registry checks.\n"
   );
 } finally {
   if (worker && worker.exitCode === null) {

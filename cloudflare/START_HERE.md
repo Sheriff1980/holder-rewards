@@ -233,14 +233,17 @@ Automatic rechecks run throughout the day. The manager overview shows failures a
 
 ## 16. Test Community Rewards
 
-1. In `/rules manage`, set the currency name and daily reward.
+1. In `/rules manage`, set the currency name, daily reward, and daily holder reward.
 2. Optionally upload a currency image.
-3. Select **Save rewards**.
-4. In Discord, run `/points claim`.
-5. Run `/points balance`.
-6. Run `/points leaderboard`.
-7. As a manager, test `/points grant` with a small amount and reason.
-8. Confirm the new balance and manager activity appear in the private manager.
+3. Set a reward multiplier on at least one holder role.
+4. Select **Save rewards**.
+5. In Discord, run `/points claim`.
+6. Run `/points balance`.
+7. Run `/points leaderboard`.
+8. Run `/points claim` again and confirm neither the daily claim nor holder accrual is awarded twice.
+9. As a manager, test `/points grant` with a small amount and reason.
+10. Run `/points audit` and confirm it reports the ledger totals.
+11. Confirm the new balance and manager activity appear in the private manager.
 
 ## 17. Customize And Export
 

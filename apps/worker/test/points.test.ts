@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  auditPointsLedger,
+  accrueDailyHolderPoints,
   claimDailyPoints,
   getPointsBalance,
   getPointsLeaderboard,
@@ -30,7 +32,8 @@ class Statement {
     if (this.sql.includes("INSERT INTO guild_settings")) {
       this.db.settings.set(String(this.values[0]), {
         reward_currency_name: String(this.values[1]),
-        daily_claim_amount: Number(this.values[2])
+        daily_claim_amount: Number(this.values[2]),
+        holder_daily_amount: Number(this.values[3])
       });
       return { success: true, meta: { changes: 1 } } as D1Result;
     }
@@ -44,7 +47,8 @@ class Statement {
       source: this.sql.includes("'admin_grant'") ? "admin_grant" : String(this.values[4])
     };
     const duplicate =
-      transaction.source.startsWith("daily_claim:") &&
+      (transaction.source.startsWith("daily_claim:") ||
+        transaction.source.startsWith("holder_accrual:")) &&
       this.db.transactions.some(
         (item) =>
           item.guildId === transaction.guildId &&
@@ -59,6 +63,14 @@ class Statement {
     if (this.sql.includes("FROM guild_settings")) {
       return (this.db.settings.get(String(this.values[0])) ?? null) as T | null;
     }
+    if (this.sql.includes("COUNT(DISTINCT discord_user_id)")) {
+      const transactions = this.db.transactions.filter((item) => item.guildId === this.values[0]);
+      return {
+        transaction_count: transactions.length,
+        member_count: new Set(transactions.map((item) => item.discordUserId)).size,
+        net_points: transactions.reduce((sum, item) => sum + item.amount, 0)
+      } as T;
+    }
     const balance = this.db.transactions
       .filter(
         (item) => item.guildId === this.values[0] && item.discordUserId === this.values[1]
@@ -68,6 +80,17 @@ class Statement {
   }
 
   async all<T>(): Promise<D1Result<T>> {
+    if (this.sql.includes("FROM role_rules")) {
+      const roleIds = this.values.slice(1).map(String);
+      return {
+        success: true,
+        results: roleIds.map((role_id) => ({
+          role_id,
+          reward_multiplier: this.db.multipliers.get(role_id) ?? 1
+        })),
+        meta: {}
+      } as unknown as D1Result<T>;
+    }
     const balances = new Map<string, number>();
     for (const transaction of this.db.transactions.filter((item) => item.guildId === this.values[0])) {
       balances.set(
@@ -86,7 +109,12 @@ class Statement {
 
 class MemoryD1 {
   transactions: Transaction[] = [];
-  settings = new Map<string, { reward_currency_name: string; daily_claim_amount: number }>();
+  settings = new Map<string, {
+    reward_currency_name: string;
+    daily_claim_amount: number;
+    holder_daily_amount: number;
+  }>();
+  multipliers = new Map<string, number>();
 
   prepare(sql: string): Statement {
     return new Statement(this, sql);
@@ -154,23 +182,66 @@ describe("points ledger", () => {
         reason: "Contest winner"
       })
     ).resolves.toEqual({ amount: 25, balance: 35, currencyName: "Points" });
+    await expect(auditPointsLedger(env, "guild-1")).resolves.toEqual({
+      transactionCount: 2,
+      memberCount: 1,
+      netPoints: 35
+    });
   });
 
   it("uses browser-managed reward settings independently for each server", async () => {
     const env = createEnv();
     await expect(
       updateRewardSettings(env, "guild-1", { currencyName: "Bananas", dailyClaimAmount: 25 })
-    ).resolves.toEqual({ currencyName: "Bananas", dailyClaimAmount: 25 });
+    ).rejects.toThrow("Holder reward");
+    await expect(
+      updateRewardSettings(env, "guild-1", {
+        currencyName: "Bananas",
+        dailyClaimAmount: 25,
+        holderDailyAmount: 4
+      })
+    ).resolves.toEqual({ currencyName: "Bananas", dailyClaimAmount: 25, holderDailyAmount: 4 });
     await expect(getRewardSettings(env, "guild-1")).resolves.toEqual({
       currencyName: "Bananas",
-      dailyClaimAmount: 25
+      dailyClaimAmount: 25,
+      holderDailyAmount: 4
     });
     await expect(
       claimDailyPoints(env, "guild-1", "user-1", new Date("2026-07-22T12:00:00.000Z"))
     ).resolves.toMatchObject({ amount: 25, currencyName: "Bananas" });
     await expect(getRewardSettings(env, "guild-2")).resolves.toEqual({
       currencyName: "Points",
-      dailyClaimAmount: 10
+      dailyClaimAmount: 10,
+      holderDailyAmount: 0
     });
+  });
+
+  it("awards holder accrual once per role and day with role multipliers", async () => {
+    const db = new MemoryD1();
+    db.settings.set("guild-1", {
+      reward_currency_name: "Points",
+      daily_claim_amount: 10,
+      holder_daily_amount: 5
+    });
+    db.multipliers.set("role-1", 1);
+    db.multipliers.set("role-2", 3);
+    const env = createEnv(db);
+    const day = new Date("2026-07-22T12:00:00.000Z");
+
+    await expect(
+      accrueDailyHolderPoints(env, "guild-1", "user-1", ["role-1", "role-2"], day)
+    ).resolves.toEqual({ awarded: 20, balance: 20 });
+    await expect(
+      accrueDailyHolderPoints(env, "guild-1", "user-1", ["role-1", "role-2"], day)
+    ).resolves.toEqual({ awarded: 0, balance: 20 });
+    await expect(
+      accrueDailyHolderPoints(
+        env,
+        "guild-1",
+        "user-1",
+        ["role-1"],
+        new Date("2026-07-23T12:00:00.000Z")
+      )
+    ).resolves.toEqual({ awarded: 5, balance: 25 });
   });
 });

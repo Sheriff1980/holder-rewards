@@ -11,6 +11,7 @@ import {
   updateRoleMatchMode
 } from "./rules.js";
 import {
+  auditPointsLedger,
   claimDailyPoints,
   getPointsBalance,
   getPointsLeaderboard,
@@ -46,6 +47,7 @@ export const discordCommands = [
       { name: "claim", description: "Collect your daily points.", type: 1 },
       { name: "balance", description: "Check your current points balance.", type: 1 },
       { name: "leaderboard", description: "Show the server points leaderboard.", type: 1 },
+      { name: "audit", description: "Recalculate and summarize the rewards ledger.", type: 1 },
       {
         name: "grant",
         description: "Reward points to a server member.",
@@ -629,6 +631,19 @@ export async function handleDiscordInteraction(
         );
         return ephemeralRewardMessage(
           `${settings.currencyName} leaderboard\n${lines.join("\n")}`,
+          iconUrl
+        );
+      }
+      if (subcommand === "audit") {
+        if (!canManageGuild(interaction)) {
+          return ephemeralMessage("You need the Manage Server permission to audit rewards.");
+        }
+        const [audit, settings] = await Promise.all([
+          auditPointsLedger(env, interaction.guild_id),
+          getRewardSettings(env, interaction.guild_id)
+        ]);
+        return ephemeralRewardMessage(
+          `${settings.currencyName} ledger: ${audit.transactionCount.toLocaleString()} transactions, ${audit.memberCount.toLocaleString()} members, ${audit.netPoints.toLocaleString()} net points.`,
           iconUrl
         );
       }

@@ -22,7 +22,8 @@ import {
   removeRoleRule,
   RuleError,
   syncMemberRoles,
-  updateRoleMatchMode
+  updateRoleMatchMode,
+  updateRoleRewardMultiplier
 } from "./rules.js";
 import { retryFailedRoleSyncs, runScheduledRoleSync } from "./scheduler.js";
 import { getRewardSettings, RewardSettingsError, updateRewardSettings } from "./points.js";
@@ -422,7 +423,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         guildId: session.guild_id,
         actorDiscordUserId: session.discord_user_id,
         action: "reward_settings_updated",
-        detail: `Currency and daily reward updated to ${rewards.dailyClaimAmount}`
+        detail: `Daily claim ${rewards.dailyClaimAmount}; holder reward ${rewards.holderDailyAmount}`
       });
       return jsonResponse({ ok: true, rewards });
     }
@@ -462,7 +463,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         traitName: input.traitName,
         traitValue: input.traitValue,
         tokenId: input.tokenId,
-        matchMode: input.matchMode
+        matchMode: input.matchMode,
+        rewardMultiplier: input.rewardMultiplier
       });
       await recordAuditEvent(env, {
         guildId: session.guild_id,
@@ -492,6 +494,27 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         detail: `${matchMode.toUpperCase()} requirements for role ...${String(input.roleId).slice(-6)}`
       });
       return jsonResponse({ ok: true, roleId: input.roleId, matchMode });
+    }
+
+    if (request.method === "PUT" && path === "role-multiplier") {
+      const input = (await request.json()) as Record<string, unknown>;
+      const roles = await listManageableDiscordRoles(env, session.guild_id);
+      if (!roles.some((role) => role.id === input.roleId)) {
+        return jsonResponse({ error: "Choose a role below the bot's role in Discord." }, 400);
+      }
+      const rewardMultiplier = await updateRoleRewardMultiplier(
+        env,
+        session.guild_id,
+        input.roleId,
+        input.rewardMultiplier
+      );
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "reward_settings_updated",
+        detail: `Holder role multiplier updated to ${rewardMultiplier}x`
+      });
+      return jsonResponse({ ok: true, roleId: input.roleId, rewardMultiplier });
     }
 
     if (request.method === "DELETE" && path.startsWith("rules/")) {

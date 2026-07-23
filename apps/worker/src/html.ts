@@ -58,7 +58,7 @@ function page(title: string, body: string): string {
       .rule-row strong, .rule-row span { display: block; overflow-wrap: anywhere; }
       .rule-row button { margin: 0; color: #a12828; background: #fff; border: 1px solid #c8a3a3; }
       .rule-group { border-bottom: 1px solid #d8dee5; }
-      .rule-group-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(170px, auto); gap: 16px; align-items: end; padding: 16px 0 4px; }
+      .rule-group-header { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, minmax(150px, auto)); gap: 16px; align-items: end; padding: 16px 0 4px; }
       .rule-group-header label { margin: 0 0 7px; font-size: 13px; }
       .rule-group-header select { min-height: 40px; }
       .rule-group .rule-row { padding-left: 16px; }
@@ -98,7 +98,7 @@ function page(title: string, body: string): string {
       .qr-handoff img { display: block; width: 100%; aspect-ratio: 1; border: 1px solid #d8dee5; background: #fff; }
       details { margin-top: 22px; border-top: 1px solid #d8dee5; padding-top: 18px; }
       summary { color: #1769c2; font-weight: 700; cursor: pointer; }
-      @media (max-width: 560px) { #chain-list, .field-grid, .icon-editor { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .activity-row { grid-template-columns: 1fr; gap: 4px; } }
+      @media (max-width: 560px) { #chain-list, .field-grid, .icon-editor, .rule-group-header { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .activity-row { grid-template-columns: 1fr; gap: 4px; } }
     </style>
   </head>
   <body>${body}</body>
@@ -391,6 +391,10 @@ export function managerPage(env: Env): string {
                 <label for="daily-amount">Daily reward</label>
                 <input id="daily-amount" type="number" min="1" max="1000000" step="1" required>
               </div>
+              <div>
+                <label for="holder-daily-amount">Daily holder reward</label>
+                <input id="holder-daily-amount" type="number" min="0" max="1000000" step="1" required>
+              </div>
             </div>
             <div class="form-actions"><button id="save-rewards" type="submit">Save rewards</button></div>
           </form>
@@ -437,6 +441,10 @@ export function managerPage(env: Env): string {
               <div>
                 <label for="chain-id">Network</label>
                 <select id="chain-id" required></select>
+              </div>
+              <div>
+                <label for="reward-multiplier">Reward multiplier</label>
+                <input id="reward-multiplier" type="number" min="1" max="100" step="1" value="1" required>
               </div>
               <div>
                 <label id="asset-address-label" for="contract-address">Contract address</label>
@@ -650,6 +658,9 @@ export function managerPage(env: Env): string {
       function syncMatchModeForRole() {
         const existing = data && data.rules.find((rule) => rule.roleId === roleInput.value);
         matchModeInput.value = existing ? existing.matchMode : "any";
+        document.getElementById("reward-multiplier").value = existing
+          ? String(existing.rewardMultiplier || 1)
+          : "1";
       }
 
       function renderOperations() {
@@ -745,7 +756,20 @@ export function managerPage(env: Env): string {
           }
           mode.value = rules[0].matchMode || "any";
           modeField.append(modeLabel, mode);
-          header.append(title, modeField);
+          const multiplierField = document.createElement("div");
+          const multiplierLabel = document.createElement("label");
+          multiplierLabel.textContent = "Reward multiplier";
+          const multiplier = document.createElement("input");
+          multiplier.type = "number";
+          multiplier.min = "1";
+          multiplier.max = "100";
+          multiplier.step = "1";
+          multiplier.value = String(rules[0].rewardMultiplier || 1);
+          multiplier.dataset.roleMultiplier = roleId;
+          multiplierLabel.htmlFor = "role-multiplier-" + roleId;
+          multiplier.id = multiplierLabel.htmlFor;
+          multiplierField.append(multiplierLabel, multiplier);
+          header.append(title, modeField, multiplierField);
           group.append(header);
           for (const rule of rules) {
           const row = document.createElement("div");
@@ -1021,7 +1045,8 @@ export function managerPage(env: Env): string {
             method: "PUT",
             body: JSON.stringify({
               currencyName: document.getElementById("currency-name").value,
-              dailyClaimAmount: document.getElementById("daily-amount").value
+              dailyClaimAmount: document.getElementById("daily-amount").value,
+              holderDailyAmount: document.getElementById("holder-daily-amount").value
             })
           });
           data.rewards = saved.rewards;
@@ -1051,7 +1076,8 @@ export function managerPage(env: Env): string {
             tokenId: value("token-id"),
             traitName: value("trait-name"),
             traitValue: value("trait-value"),
-            matchMode: matchModeInput.value
+            matchMode: matchModeInput.value,
+            rewardMultiplier: value("reward-multiplier")
           };
           const saved = await api("rules", { method: "POST", body: JSON.stringify(payload) });
           for (const existing of data.rules) {
@@ -1088,6 +1114,33 @@ export function managerPage(env: Env): string {
       });
 
       document.getElementById("rule-list").addEventListener("change", async (event) => {
+        const multiplier = event.target.closest("input[data-role-multiplier]");
+        if (multiplier) {
+          multiplier.disabled = true;
+          result.className = "";
+          result.textContent = "Saving reward multiplier...";
+          try {
+            const saved = await api("role-multiplier", {
+              method: "PUT",
+              body: JSON.stringify({
+                roleId: multiplier.dataset.roleMultiplier,
+                rewardMultiplier: multiplier.value
+              })
+            });
+            for (const rule of data.rules) {
+              if (rule.roleId === saved.roleId) rule.rewardMultiplier = saved.rewardMultiplier;
+            }
+            result.className = "success";
+            result.textContent = "Reward multiplier updated.";
+          } catch (error) {
+            result.className = "error";
+            result.textContent = error instanceof Error ? error.message : "Reward multiplier could not be updated.";
+            renderRules();
+          } finally {
+            multiplier.disabled = false;
+          }
+          return;
+        }
         const select = event.target.closest("select[data-role-mode]");
         if (!select) return;
         select.disabled = true;
@@ -1123,6 +1176,7 @@ export function managerPage(env: Env): string {
         document.getElementById("accent-color").value = data.branding.accentColor;
         document.getElementById("currency-name").value = data.rewards.currencyName;
         document.getElementById("daily-amount").value = data.rewards.dailyClaimAmount;
+        document.getElementById("holder-daily-amount").value = data.rewards.holderDailyAmount;
         fullWalletAddresses.checked = data.privacy.managersCanViewFullAddresses;
         renderCurrencyIcon();
         renderBrandLogo();

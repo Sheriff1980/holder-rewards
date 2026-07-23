@@ -283,7 +283,13 @@ describe("Cloudflare Worker", () => {
       expect(command.contexts).toEqual([0]);
     }
     const points = discordCommands.find((command) => command.name === "points");
-    expect(points?.options.map((option) => option.name)).toEqual(["claim", "balance", "leaderboard", "grant"]);
+    expect(points?.options.map((option) => option.name)).toEqual([
+      "claim",
+      "balance",
+      "leaderboard",
+      "audit",
+      "grant"
+    ]);
     const rules = discordCommands.find((command) => command.name === "rules");
     expect(rules?.options.map((option) => option.name)).toEqual([
       "manage",

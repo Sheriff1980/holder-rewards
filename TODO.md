@@ -178,17 +178,18 @@ This should be a self-hostable, open-source alternative to paid third-party Disc
 - [x] Design points ledger schema with append-only transactions.
 - [ ] Add reward source types:
   - [x] Daily claim.
-  - [ ] Holder accrual.
+  - [x] Holder accrual.
   - [x] Admin grant with manager identity and optional reason metadata.
   - [ ] Quest completion.
   - [ ] Purchase/sale bonus.
   - [ ] Tip.
   - [ ] Raffle/store spend.
 - [x] Implement duplicate-safe, holder-qualified daily claim cooldowns using UTC days.
-- [ ] Implement soft-staking accrual calculation.
-- [ ] Implement NFT multiplier rules.
-- [ ] Add anti-abuse limits for claims, tips, and quest rewards.
-- [ ] Add balance recalculation/audit command.
+- [x] Implement soft-staking accrual calculation.
+- [x] Implement NFT multiplier rules.
+- [x] Add duplicate-safe limits for daily claims and holder accrual.
+- [ ] Add anti-abuse limits for tips and quest rewards when those features are implemented.
+- [x] Add balance recalculation/audit command.
 
 ## Security TODO
 
@@ -279,7 +280,7 @@ This should be a self-hostable, open-source alternative to paid third-party Disc
 5. Add scheduled ownership refresh.
 6. Add admin rule management. (Browser rule CRUD, diagnostics, and recent role/reward activity complete.)
 7. Add points ledger and daily claim.
-8. Add soft staking and multipliers.
+8. Add soft staking and multipliers. (Complete.)
 9. Add exports, audit logs, docs, and Docker setup.
 10. Add quests/store/raffles/sales bot after the core is stable.
 11. Package a v1 self-hosted release with Docker images, setup guide, and migration docs.

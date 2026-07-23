@@ -4,7 +4,8 @@ import {
   decideRoleAction,
   isUint256,
   syncMemberRoles,
-  updateRoleMatchMode
+  updateRoleMatchMode,
+  updateRoleRewardMultiplier
 } from "../src/rules.js";
 import type { Env } from "../src/types.js";
 
@@ -89,6 +90,34 @@ describe("role requirement modes", () => {
     await expect(
       updateRoleMatchMode(env, "123456789012345678", "223456789012345678", "sometimes")
     ).rejects.toThrow("any or all");
+  });
+});
+
+describe("holder reward multipliers", () => {
+  it("updates every active requirement for one server role", async () => {
+    let bound: unknown[] = [];
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: (...values: unknown[]) => {
+            bound = values;
+            return { run: async () => ({ success: true, meta: { changes: 2 } }) };
+          }
+        })
+      }
+    } as unknown as Env;
+
+    await expect(
+      updateRoleRewardMultiplier(env, "123456789012345678", "223456789012345678", 3)
+    ).resolves.toBe(3);
+    expect(bound).toEqual([3, "123456789012345678", "223456789012345678"]);
+  });
+
+  it("rejects unsafe multiplier values", async () => {
+    const env = { DB: { prepare: () => { throw new Error("should not write"); } } } as unknown as Env;
+    await expect(
+      updateRoleRewardMultiplier(env, "123456789012345678", "223456789012345678", 101)
+    ).rejects.toThrow("between 1 and 100");
   });
 });
 
