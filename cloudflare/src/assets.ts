@@ -9,6 +9,10 @@ type AssetRow = {
   updated_at: string;
 };
 
+type StoredAssetRow = Omit<AssetRow, "data"> & {
+  data: number[];
+};
+
 export class AssetError extends Error {
   constructor(message: string, readonly status = 400) {
     super(message);
@@ -63,11 +67,12 @@ export async function saveCurrencyIcon(env: Env, guildId: string, file: File): P
 }
 
 export async function getCurrencyIcon(env: Env, guildId: string): Promise<AssetRow | null> {
-  return env.DB.prepare(
+  const row = await env.DB.prepare(
     "SELECT content_type, data, updated_at FROM guild_assets WHERE guild_id = ? AND asset_type = 'currency_icon'"
   )
     .bind(guildId)
-    .first<AssetRow>();
+    .first<StoredAssetRow>();
+  return row ? { ...row, data: Uint8Array.from(row.data).buffer } : null;
 }
 
 export async function hasCurrencyIcon(env: Env, guildId: string): Promise<boolean> {
@@ -107,11 +112,12 @@ export async function saveBrandLogo(env: Env, guildId: string, file: File): Prom
 }
 
 export async function getBrandLogo(env: Env, guildId: string): Promise<AssetRow | null> {
-  return env.DB.prepare(
+  const row = await env.DB.prepare(
     "SELECT content_type, data, updated_at FROM guild_brand_assets WHERE guild_id = ?"
   )
     .bind(guildId)
-    .first<AssetRow>();
+    .first<StoredAssetRow>();
+  return row ? { ...row, data: Uint8Array.from(row.data).buffer } : null;
 }
 
 export async function hasBrandLogo(env: Env, guildId: string): Promise<boolean> {

@@ -59,7 +59,9 @@ class Statement {
     if (this.sql.includes("SELECT 1 AS found")) {
       return (asset ? { found: 1 } : null) as T | null;
     }
-    return (asset ?? null) as T | null;
+    return (asset
+      ? { ...asset, data: Array.from(new Uint8Array(asset.data)) }
+      : null) as T | null;
   }
 }
 
@@ -91,9 +93,13 @@ describe("currency icons", () => {
     );
     await saveCurrencyIcon(env, "123456789012345678", png);
     await expect(hasCurrencyIcon(env, "123456789012345678")).resolves.toBe(true);
-    await expect(getCurrencyIcon(env, "123456789012345678")).resolves.toMatchObject({
+    const stored = await getCurrencyIcon(env, "123456789012345678");
+    expect(stored).toMatchObject({
       content_type: "image/png"
     });
+    expect(Array.from(new Uint8Array(stored?.data ?? new ArrayBuffer(0)))).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
+    ]);
     await expect(removeCurrencyIcon(env, "123456789012345678")).resolves.toBe(true);
     await expect(hasCurrencyIcon(env, "123456789012345678")).resolves.toBe(false);
   });
