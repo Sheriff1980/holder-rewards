@@ -29,7 +29,7 @@ export const BUILTIN_CHAINS: readonly ChainDefinition[] = [
     name: "Ethereum",
     chainReference: "1",
     nativeCurrencySymbol: "ETH",
-    defaultRpcUrl: "https://cloudflare-eth.com/v1/mainnet",
+    defaultRpcUrl: "https://ethereum-rpc.publicnode.com",
     explorerUrl: "https://etherscan.io",
     builtin: true
   },
@@ -79,7 +79,7 @@ export const BUILTIN_CHAINS: readonly ChainDefinition[] = [
     name: "Solana",
     chainReference: "mainnet-beta",
     nativeCurrencySymbol: "SOL",
-    defaultRpcUrl: "https://rpc.solanatracker.io/public",
+    defaultRpcUrl: "https://api.mainnet-beta.solana.com",
     explorerUrl: "https://explorer.solana.com",
     builtin: true
   },

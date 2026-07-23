@@ -6,12 +6,12 @@ Holder Rewards separates a chain's identity from the adapter that knows how to c
 
 | ID | Family | Network reference | Native currency | Default RPC |
 | --- | --- | ---: | --- | --- |
-| `ethereum` | EVM | `1` | ETH | `https://cloudflare-eth.com/v1/mainnet` |
+| `ethereum` | EVM | `1` | ETH | `https://ethereum-rpc.publicnode.com` |
 | `base` | EVM | `8453` | ETH | `https://mainnet.base.org` |
 | `polygon` | EVM | `137` | POL | `https://polygon.drpc.org` |
 | `arbitrum` | EVM | `42161` | ETH | `https://arb1.arbitrum.io/rpc` |
 | `apechain` | EVM | `33139` | APE | `https://apechain.calderachain.xyz/http` |
-| `solana` | Solana | `mainnet-beta` | SOL | `https://rpc.solanatracker.io/public` |
+| `solana` | Solana | `mainnet-beta` | SOL | `https://api.mainnet-beta.solana.com` |
 
 The defaults are public endpoints intended for setup and light community traffic. Public RPC endpoints may be rate-limited; a failed ownership check leaves existing roles unchanged. Exact Solana mint/SPL-token checks use a keyless public RPC without another account or key. The manager automatically checks every enabled provider and offers a one-click retry when a network is unavailable.
 
