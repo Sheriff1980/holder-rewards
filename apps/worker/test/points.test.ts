@@ -29,11 +29,21 @@ class Statement {
   }
 
   async run(): Promise<D1Result> {
-    if (this.sql.includes("INSERT INTO guild_settings")) {
-      this.db.settings.set(String(this.values[0]), {
-        reward_currency_name: String(this.values[1]),
-        daily_claim_amount: Number(this.values[2]),
-        holder_daily_amount: Number(this.values[3])
+    if (this.sql.includes("INSERT OR IGNORE INTO guild_settings")) {
+      if (!this.db.settings.has(String(this.values[0]))) {
+        this.db.settings.set(String(this.values[0]), {
+          reward_currency_name: "Points",
+          daily_claim_amount: 10,
+          holder_daily_amount: 0
+        });
+      }
+      return { success: true, meta: { changes: 1 } } as D1Result;
+    }
+    if (this.sql.includes("UPDATE guild_settings")) {
+      this.db.settings.set(String(this.values[3]), {
+        reward_currency_name: String(this.values[0]),
+        daily_claim_amount: Number(this.values[1]),
+        holder_daily_amount: Number(this.values[2])
       });
       return { success: true, meta: { changes: 1 } } as D1Result;
     }

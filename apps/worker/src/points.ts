@@ -77,15 +77,16 @@ export async function updateRewardSettings(
       "INSERT INTO guilds (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
     ).bind(guildId),
     env.DB.prepare(
-      `INSERT INTO guild_settings
-        (guild_id, reward_currency_name, daily_claim_amount, holder_daily_amount, updated_at)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(guild_id) DO UPDATE SET
-         reward_currency_name = excluded.reward_currency_name,
-         daily_claim_amount = excluded.daily_claim_amount,
-         holder_daily_amount = excluded.holder_daily_amount,
-         updated_at = CURRENT_TIMESTAMP`
-    ).bind(guildId, currencyName, dailyClaimAmount, holderDailyAmount)
+      "INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)"
+    ).bind(guildId),
+    env.DB.prepare(
+      `UPDATE guild_settings
+       SET reward_currency_name = ?,
+         daily_claim_amount = ?,
+         holder_daily_amount = ?,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE guild_id = ?`
+    ).bind(currencyName, dailyClaimAmount, holderDailyAmount, guildId)
   ]);
   return { currencyName, dailyClaimAmount, holderDailyAmount };
 }
