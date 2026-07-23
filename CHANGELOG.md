@@ -4,6 +4,19 @@ All notable changes to Holder Rewards will be documented here. The project follo
 
 ## Unreleased
 
+## 0.1.1 - 2026-07-23
+
+### Fixed
+
+- Clean-checkout workspace lint and type resolution no longer depend on generated `dist` files.
+
+### Verified
+
+- Public browser-only Cloudflare deployment routes to the standalone release directory.
+- Clean dependency installation, workspace checks, tests, build, migrations, and one-click release smoke test.
+
+## 0.1.0 - 2026-07-23
+
 ### Added
 
 - One-click Cloudflare Worker and D1 deployment foundation.

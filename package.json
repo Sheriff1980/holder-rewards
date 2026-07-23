@@ -1,6 +1,6 @@
 {
   "name": "holder-rewards",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Self-hostable Discord NFT/token holder verification and rewards platform.",
   "license": "MIT",

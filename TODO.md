@@ -239,7 +239,7 @@ This should be a self-hostable, open-source alternative to paid third-party Disc
   - [x] Advanced custom EVM networks are managed through the private Discord manager; no extra setup secret is required.
 - [x] Keep secrets only in environment variables or secret managers.
 - [x] Add one-click-host configuration with automatic D1 provisioning and migrations.
-- [ ] Add the live Deploy to Cloudflare button after the permanent GitHub URL exists.
+- [x] Add the live Deploy to Cloudflare button after the permanent GitHub URL exists.
 - [x] Provide `.env.docker.example` with every advanced Docker variable documented.
 - [x] Provide `.dev.vars.example` for local Cloudflare development.
 - [x] Provide `docker-compose.yml` for local and small production deployments.
