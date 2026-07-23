@@ -383,15 +383,23 @@ async function reserveDiscordInteraction(env: Env, interactionId: string): Promi
 }
 
 function formatRoleSync(summary: Awaited<ReturnType<typeof syncMemberRoles>>): string {
-  const changed = summary.added.length + summary.removed.length;
-  return [
-    `Role refresh complete: ${summary.added.length} added, ${summary.removed.length} removed, ${summary.unchanged.length} unchanged.`,
-    summary.errors.length > 0
-      ? `${summary.errors.length} role check(s) could not be completed. Ask an admin to check the bot role position and RPC settings.`
-      : changed === 0
-        ? "Your qualifying roles were already up to date."
-        : "Your Discord roles are now up to date."
-  ].join("\n");
+  const mentions = (roleIds: string[]) =>
+    [...new Set(roleIds)].map((roleId) => `<@&${roleId}>`).join(", ");
+  const lines = [
+    "Role refresh complete.",
+    summary.qualified.length > 0
+      ? `**You qualify for:** ${mentions(summary.qualified)}`
+      : "**You qualify for:** No configured holder roles."
+  ];
+  if (summary.added.length > 0) lines.push(`**Added now:** ${mentions(summary.added)}`);
+  if (summary.removed.length > 0) lines.push(`**Removed now:** ${mentions(summary.removed)}`);
+  if (summary.errors.length > 0) {
+    lines.push(`**Could not check or update:** ${mentions(summary.errors.map((error) => error.roleId))}`);
+    lines.push("Ask an admin to check the affected holder rule.");
+  } else if (summary.added.length === 0 && summary.removed.length === 0) {
+    lines.push("No role changes were needed.");
+  }
+  return lines.join("\n");
 }
 
 async function editDeferredReply(interaction: DiscordInteraction, content: string): Promise<void> {
@@ -401,7 +409,7 @@ async function editDeferredReply(interaction: DiscordInteraction, content: strin
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content })
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } })
     }
   );
 }

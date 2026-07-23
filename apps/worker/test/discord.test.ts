@@ -147,6 +147,22 @@ function pointsClaimInteraction(id: string): DiscordInteraction {
   };
 }
 
+function verifyRefreshInteraction(id: string): DiscordInteraction {
+  return {
+    id,
+    type: 2,
+    guild_id: "123456789012345678",
+    member: {
+      permissions: "0",
+      user: { id: "223456789012345678" }
+    },
+    data: {
+      name: "verify",
+      options: [{ name: "refresh", type: 1 }]
+    }
+  };
+}
+
 function pointsAuditInteraction(id: string): DiscordInteraction {
   return {
     id,
@@ -300,6 +316,29 @@ describe("Discord interaction safety", () => {
 
     expect(await responseContent(response)).toContain("collected 10 Points");
     expect(mocks.claimDailyPoints).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the roles affected by a member refresh", async () => {
+    mocks.syncMemberRoles.mockResolvedValue({
+      added: ["423456789012345678"],
+      removed: ["523456789012345678"],
+      unchanged: ["623456789012345678"],
+      qualified: ["423456789012345678", "623456789012345678"],
+      errors: [{ roleId: "723456789012345678", message: "RPC timeout" }]
+    });
+
+    const response = await handleDiscordInteraction(
+      verifyRefreshInteraction("823456789012345678"),
+      new URL("https://example.com/interactions"),
+      createEnv()
+    );
+    const content = await responseContent(response);
+
+    expect(content).toContain("**You qualify for:** <@&423456789012345678>, <@&623456789012345678>");
+    expect(content).toContain("**Added now:** <@&423456789012345678>");
+    expect(content).toContain("**Removed now:** <@&523456789012345678>");
+    expect(content).toContain("**Could not check or update:** <@&723456789012345678>");
+    expect(content).not.toContain("unchanged");
   });
 
   it("does not consume a daily claim for an unqualified member", async () => {
