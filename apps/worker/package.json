@@ -7,7 +7,7 @@
     "build": "wrangler deploy --dry-run --outdir dist --config ../../wrangler.jsonc",
     "dev": "pnpm --filter @holder-rewards/chains build && wrangler dev --config ../../wrangler.jsonc",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "pnpm --filter @holder-rewards/chains build && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
