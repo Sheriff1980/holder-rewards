@@ -1,0 +1,26 @@
+{
+  "name": "@holder-rewards/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist --config ../../wrangler.jsonc",
+    "dev": "pnpm --filter @holder-rewards/chains build && wrangler dev --config ../../wrangler.jsonc",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@holder-rewards/chains": "workspace:*",
+    "bs58": "^6.0.0",
+    "tweetnacl": "^1.0.3",
+    "uqr": "^0.1.3",
+    "viem": "^2.37.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.0.0"
+  }
+}

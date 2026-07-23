@@ -1,0 +1,31 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "holder-rewards",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-07-22",
+  "workers_dev": true,
+  "preview_urls": false,
+	"vars": {
+		"APP_NAME": "Holder Rewards",
+		"REWARD_CURRENCY_NAME": "Points",
+		"DAILY_CLAIM_AMOUNT": "10"
+	},
+	"secrets": {
+		"required": [
+			"DISCORD_BOT_TOKEN"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "holder-rewards",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "migrations"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"7,22,37,52 * * * *"
+		]
+	}
+}

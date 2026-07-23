@@ -1,0 +1,5 @@
+# Discord Developer Portal > Bot
+DISCORD_BOT_TOKEN=replace-me
+
+# Optional: enables advanced custom EVM network settings.
+# SETUP_TOKEN=replace-with-a-long-random-password

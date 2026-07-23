@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement for community operators or members.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: community-need
+    attributes:
+      label: Community need
+      description: What should a community operator or member be able to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: simple-flow
+    attributes:
+      label: Simplest useful flow
+      description: Describe the experience without assuming command-line or Docker knowledge.
+    validations:
+      required: true
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Primary user
+      options:
+        - Community member
+        - Community manager
+        - Self-hosting operator
+        - Advanced developer
+    validations:
+      required: true

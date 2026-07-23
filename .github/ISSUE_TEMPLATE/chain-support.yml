@@ -1,0 +1,42 @@
+name: Chain or asset support
+description: Request support for another network, token standard, or NFT format.
+title: "[Chain]: "
+labels:
+  - chain-support
+body:
+  - type: input
+    id: network
+    attributes:
+      label: Network
+      placeholder: Network name and mainnet chain ID/reference
+    validations:
+      required: true
+  - type: dropdown
+    id: family
+    attributes:
+      label: Chain family
+      options:
+        - EVM-compatible
+        - Solana-compatible
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: assets
+    attributes:
+      label: Assets and rules needed
+      description: Describe the NFT, token, trait, or ownership rule the community needs.
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: Official technical documentation
+      placeholder: https://...
+    validations:
+      required: true
+  - type: textarea
+    id: public-rpc
+    attributes:
+      label: Free or self-hosted data path
+      description: List any public RPC, open-source indexer, or optional provider that can verify ownership.
