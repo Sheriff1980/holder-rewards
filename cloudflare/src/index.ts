@@ -546,6 +546,11 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
     if (error instanceof SyntaxError) {
       return jsonResponse({ error: "Request body must be valid JSON." }, 400);
     }
+    console.error("Admin request failed", {
+      method: request.method,
+      path,
+      error
+    });
     return jsonResponse({ error: "The holder-role manager is temporarily unavailable." }, 503);
   }
   return jsonResponse({ error: "Not found" }, 404);
