@@ -38,6 +38,7 @@ The hosted foundation is working. It currently provides:
 - An append-only, per-server points ledger with browser-managed naming and currency images, daily claims, manager grants, balances, and a leaderboard.
 - Member tipping with a manager-controlled daily cap, and quests that pay once per member for linking a wallet, holding a role, collecting daily rewards, submitting a secret code, or completing manager-reviewed custom proof quests.
 - Point-priced raffles with weighted draws, automatic prize roles, and full refunds on cancellation, plus a points store with stock limits, automatic role grants, and safe rollback when Discord rejects a grant.
+- A scheduled sales bot that posts new collection sales to a chosen Discord channel through the optional EVM indexer configuration.
 - Per-server community branding with a display name, logo, and accessible accent color.
 - A manager overview for verified members, wallets, rules, rewards activity, scheduled checks, sync problems, and automatic blockchain-provider health checks with one-click retry.
 - An automatic first-page launch check for app data, Discord setup, and every enabled blockchain network.
@@ -77,6 +78,7 @@ After deployment, open the generated `workers.dev` URL. The app configures its D
 See [chain support](docs/CHAINS.md) for built-in networks and the custom-chain format.
 See [holder role rules](docs/RULES.md) for NFT/token rule setup and current limitations.
 See [community points](docs/POINTS.md) for daily claims, balances, and ledger behavior.
+See [sales bot](docs/SALES.md) for collection sale posts.
 See [customization](docs/CUSTOMIZATION.md) for community branding and image storage.
 See [updates and recovery](docs/UPGRADES_AND_RECOVERY.md) for D1 migrations, backups, exports, and point-in-time restore.
 

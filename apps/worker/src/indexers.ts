@@ -157,7 +157,6 @@ export type DasAsset = {
   mintAddress: string;
   attributes: NftAttribute[];
 };
-
 type DasAssetsResponse = {
   result?: {
     total?: number;
@@ -231,4 +230,113 @@ export async function fetchDasCollectionAssets(
     }
   }
   return assets;
+}
+
+export type NftSale = {
+  tokenId: string;
+  marketplace: string | null;
+  buyerAddress: string | null;
+  sellerAddress: string | null;
+  priceValue: string | null;
+  priceSymbol: string | null;
+  transactionHash: string;
+  blockNumber: number;
+};
+
+type AlchemySalesResponse = {
+  nftSales?: Array<{
+    tokenId?: unknown;
+    marketplace?: unknown;
+    buyerAddress?: unknown;
+    sellerAddress?: unknown;
+    price?: { value?: unknown; paymentToken?: { symbol?: unknown } };
+    transactionHash?: unknown;
+    blockNumber?: unknown;
+  }>;
+};
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+export async function fetchNftSales(
+  indexerUrl: string,
+  contractAddress: string,
+  fromBlock: number,
+  limit: number,
+  order: "asc" | "desc" = "asc"
+): Promise<NftSale[]> {
+  const url = new URL(`${indexerUrl}/getNFTSales`);
+  url.searchParams.set("contractAddress", contractAddress);
+  url.searchParams.set("fromBlock", String(fromBlock));
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("order", order);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), INDEXER_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`NFT sales indexer returned ${response.status}.`);
+    const body = (await response.json()) as AlchemySalesResponse;
+    if (!Array.isArray(body.nftSales)) {
+      throw new Error("NFT sales indexer returned an invalid response.");
+    }
+    return body.nftSales.flatMap((sale) => {
+      const tokenId = optionalString(sale.tokenId);
+      const transactionHash = optionalString(sale.transactionHash);
+      const blockNumber = Number(sale.blockNumber);
+      if (!tokenId || !transactionHash || !Number.isSafeInteger(blockNumber) || blockNumber < 0) {
+        return [];
+      }
+      return [{
+        tokenId,
+        marketplace: optionalString(sale.marketplace),
+        buyerAddress: optionalString(sale.buyerAddress),
+        sellerAddress: optionalString(sale.sellerAddress),
+        priceValue: optionalString(sale.price?.value),
+        priceSymbol: optionalString(sale.price?.paymentToken?.symbol),
+        transactionHash,
+        blockNumber
+      }];
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("NFT sales indexer timed out after 5 seconds.", { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function fetchNftImage(
+  indexerUrl: string,
+  contractAddress: string,
+  tokenId: string
+): Promise<{ name: string | null; imageUrl: string | null }> {
+  const url = new URL(`${indexerUrl}/getNFTMetadata`);
+  url.searchParams.set("contractAddress", contractAddress);
+  url.searchParams.set("tokenId", tokenId);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), INDEXER_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return { name: null, imageUrl: null };
+    const body = (await response.json()) as {
+      name?: unknown;
+      image?: { thumbnailUrl?: unknown; cachedUrl?: unknown; originalUrl?: unknown };
+    };
+    return {
+      name: optionalString(body.name),
+      imageUrl:
+        optionalString(body.image?.thumbnailUrl) ??
+        optionalString(body.image?.cachedUrl) ??
+        optionalString(body.image?.originalUrl)
+    };
+  } catch {
+    return { name: null, imageUrl: null };
+  } finally {
+    clearTimeout(timeout);
+  }
 }

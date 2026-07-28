@@ -603,6 +603,27 @@ export function managerPage(env: Env): string {
           <div id="purchase-list" class="rule-list"></div>
         </section>
         <section class="panel">
+          <h2>Sales bot</h2>
+          <p class="muted">Posts to a channel when an NFT from a watched collection sells. Needs an NFT indexer URL for the network (see Advanced network settings).</p>
+          <form id="sales-form">
+            <div class="field-grid">
+              <div>
+                <label for="sales-chain">Network</label>
+                <select id="sales-chain"></select>
+              </div>
+              <div>
+                <label for="sales-channel">Post to channel</label>
+                <select id="sales-channel"></select>
+              </div>
+            </div>
+            <label for="sales-contract">Collection contract</label>
+            <input id="sales-contract" placeholder="0x..." autocomplete="off" required>
+            <div class="form-actions"><button id="save-sales-watch" type="submit">Watch collection</button></div>
+          </form>
+          <div id="sales-result" aria-live="polite"></div>
+          <div id="sales-list" class="rule-list"></div>
+        </section>
+        <section class="panel">
           <details>
             <summary>Advanced network settings</summary>
             <h2>Add an EVM-compatible network</h2>
@@ -725,6 +746,12 @@ export function managerPage(env: Env): string {
       const storeResult = document.getElementById("store-result");
       const storeList = document.getElementById("store-list");
       const purchaseList = document.getElementById("purchase-list");
+      const salesForm = document.getElementById("sales-form");
+      const salesChain = document.getElementById("sales-chain");
+      const salesChannel = document.getElementById("sales-channel");
+      const saveSalesWatch = document.getElementById("save-sales-watch");
+      const salesResult = document.getElementById("sales-result");
+      const salesList = document.getElementById("sales-list");
       const token = new URLSearchParams(location.search).get("token");
       let data;
 
@@ -1873,6 +1900,80 @@ export function managerPage(env: Env): string {
         }
       });
 
+      function renderSalesWatches() {
+        salesList.replaceChildren();
+        if (!data.salesWatches || !data.salesWatches.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No collections watched yet.";
+          salesList.append(empty);
+          return;
+        }
+        const chainNames = new Map(data.chains.map((chain) => [chain.id, chain.name]));
+        const channelNames = new Map((data.channels || []).map((channel) => [channel.id, channel.name]));
+        for (const watch of data.salesWatches) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const description = document.createElement("span");
+          description.textContent = (chainNames.get(watch.chainId) || watch.chainId) + " - " + watch.contractAddress.slice(0, 10) + "...";
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          detail.textContent = watch.lastError
+            ? "Needs attention: " + watch.lastError
+            : "Posting to #" + (channelNames.get(watch.channelId) || watch.channelId);
+          copy.append(description, detail);
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.dataset.salesWatchId = watch.id;
+          remove.textContent = "Remove";
+          row.append(copy, remove);
+          salesList.append(row);
+        }
+      }
+
+      salesForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        saveSalesWatch.disabled = true;
+        salesResult.className = "";
+        salesResult.textContent = "Adding watch...";
+        try {
+          const saved = await api("sales-watches", {
+            method: "POST",
+            body: JSON.stringify({
+              chainId: salesChain.value,
+              contractAddress: document.getElementById("sales-contract").value.trim(),
+              channelId: salesChannel.value
+            })
+          });
+          data.salesWatches = (data.salesWatches || []).concat(saved.watch);
+          renderSalesWatches();
+          salesForm.reset();
+          salesResult.className = "success";
+          salesResult.textContent = "Watching. The first check runs with the next scheduled pass and only new sales are posted.";
+        } catch (error) {
+          salesResult.className = "error";
+          salesResult.textContent = error instanceof Error ? error.message : "The collection could not be watched.";
+        } finally {
+          saveSalesWatch.disabled = false;
+        }
+      });
+
+      salesList.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-sales-watch-id]");
+        if (!button) return;
+        button.disabled = true;
+        try {
+          await api("sales-watches/" + encodeURIComponent(button.dataset.salesWatchId), { method: "DELETE" });
+          data.salesWatches = data.salesWatches.filter((watch) => watch.id !== button.dataset.salesWatchId);
+          renderSalesWatches();
+        } catch (error) {
+          salesResult.className = "error";
+          salesResult.textContent = error instanceof Error ? error.message : "The watch could not be removed.";
+          button.disabled = false;
+        }
+      });
+
       async function initialize() {
         if (!token) throw new Error("This manager link is invalid or incomplete.");
         data = await api("session");
@@ -1889,6 +1990,9 @@ export function managerPage(env: Env): string {
         setStoreRoleOptions();
         renderStoreItems();
         renderPurchases();
+        setOptions(salesChain, data.chains.filter((chain) => chain.family === "evm"));
+        setOptions(salesChannel, data.channels || []);
+        renderSalesWatches();
         syncMatchModeForRole();
         document.getElementById("community-name").value = data.branding.name;
         document.getElementById("accent-color").value = data.branding.accentColor;

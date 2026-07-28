@@ -26,6 +26,13 @@ import {
   removeStoreItem,
   StoreError
 } from "./store.js";
+import {
+  createSalesWatch,
+  listSalesWatches,
+  listTextChannels,
+  removeSalesWatch,
+  SalesWatchError
+} from "./sales.js";
 import { managerPage, setupPage, verifyPage } from "./html.js";
 import type { DiscordInteraction, Env, RoleSyncQueueMessage } from "./types.js";
 import { AdminError, listManageableDiscordRoles, requireAdminSession } from "./admin.js";
@@ -48,6 +55,7 @@ import {
   updateRoleRewardMultiplier
 } from "./rules.js";
 import { processRoleSyncQueue, retryFailedRoleSyncs, runScheduledRoleSync } from "./scheduler.js";
+import { pollSalesWatches } from "./sales.js";
 import { getRewardSettings, RewardSettingsError, updateRewardSettings } from "./points.js";
 import {
   AssetError,
@@ -285,7 +293,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, hasIcon, hasLogo] = await Promise.all([
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, hasIcon, hasLogo] = await Promise.all([
         listChains(env),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
@@ -299,6 +307,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         listStoreItems(env, session.guild_id),
         listRecentPurchases(env, session.guild_id),
         listPendingSubmissions(env, session.guild_id),
+        listSalesWatches(env, session.guild_id),
+        listTextChannels(env, session.guild_id).catch(() => []),
         hasCurrencyIcon(env, session.guild_id),
         hasBrandLogo(env, session.guild_id)
       ]);
@@ -317,6 +327,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         storeItems,
         recentPurchases,
         pendingSubmissions,
+        salesWatches,
+        channels,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
           : null,
@@ -762,6 +774,38 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         ? jsonResponse({ ok: true })
         : jsonResponse({ error: "That store item was already removed." }, 404);
     }
+
+    if (request.method === "POST" && path === "sales-watches") {
+      const input = (await request.json()) as Record<string, unknown>;
+      const watch = await createSalesWatch(env, {
+        guildId: session.guild_id,
+        chainId: input.chainId,
+        contractAddress: input.contractAddress,
+        channelId: input.channelId,
+        createdBy: session.discord_user_id
+      });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "sales_watch_created",
+        detail: `Sales watch for ${watch.contractAddress.slice(0, 10)}... on ${watch.chainId}`
+      });
+      return jsonResponse({ ok: true, watch }, 201);
+    }
+
+    if (request.method === "DELETE" && path.startsWith("sales-watches/")) {
+      const watchId = path.slice("sales-watches/".length);
+      const removed = await removeSalesWatch(env, session.guild_id, watchId);
+      if (removed) await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "sales_watch_removed",
+        detail: `Sales watch ...${watchId.slice(-6)} removed`
+      });
+      return removed
+        ? jsonResponse({ ok: true })
+        : jsonResponse({ error: "That sales watch was already removed." }, 404);
+    }
   } catch (error) {
     if (error instanceof AdminError || error instanceof RuleError) {
       return jsonResponse({ error: error.message }, error.status);
@@ -785,6 +829,9 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
       return jsonResponse({ error: error.message }, 400);
     }
     if (error instanceof StoreError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof SalesWatchError) {
       return jsonResponse({ error: error.message }, 400);
     }
     if (error instanceof SyntaxError) {
@@ -913,6 +960,11 @@ export default {
       .first<{ value: string }>();
     if (origin?.value) await ensureDiscordSetup(env, origin.value);
     await runScheduledRoleSync(env);
+    try {
+      await pollSalesWatches(env);
+    } catch (error) {
+      console.error("Sales watch poll failed", error);
+    }
   },
   async queue(batch: MessageBatch<RoleSyncQueueMessage>, env: Env): Promise<void> {
     await processRoleSyncQueue(env, batch);

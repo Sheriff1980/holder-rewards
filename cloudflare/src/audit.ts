@@ -24,7 +24,9 @@ export type AuditAction =
   | "raffle_drawn"
   | "raffle_cancelled"
   | "store_item_created"
-  | "store_item_removed";
+  | "store_item_removed"
+  | "sales_watch_created"
+  | "sales_watch_removed";
 
 export async function recordAuditEvent(
   env: Env,
