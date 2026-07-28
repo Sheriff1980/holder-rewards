@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { retryFailedRoleSyncs, runScheduledRoleSync } from "../src/scheduler.js";
+import {
+  processRoleSyncQueue,
+  retryFailedRoleSyncs,
+  runScheduledRoleSync
+} from "../src/scheduler.js";
 import type { RoleSyncSummary } from "../src/rules.js";
-import type { Env } from "../src/types.js";
+import type { Env, RoleSyncQueueMessage } from "../src/types.js";
 
 type Member = {
   guild_id: string;
@@ -136,5 +140,63 @@ describe("scheduled role synchronization", () => {
     expect(report).toEqual({ processed: 2, failed: 0, nextCursor: "" });
     expect(calls.map((userId) => userId.slice(-1))).toEqual(["1", "3"]);
     expect(db.members.every((member) => member.last_sync_error === null)).toBe(true);
+  });
+
+  it("dispatches the batch to a queue instead of syncing inline when bound", async () => {
+    const db = new SchedulerDb();
+    const sent: Array<Array<{ body: RoleSyncQueueMessage }>> = [];
+    const env: Env = {
+      ...createEnv(db),
+      ROLE_SYNC_QUEUE: {
+        sendBatch: async (messages: Array<{ body: RoleSyncQueueMessage }>) => {
+          sent.push(messages);
+        }
+      } as unknown as Queue<RoleSyncQueueMessage>
+    };
+    let inlineCalls = 0;
+
+    const report = await runScheduledRoleSync(
+      env,
+      async () => {
+        inlineCalls += 1;
+        return emptySummary();
+      },
+      () => 1_000
+    );
+
+    expect(report).toEqual({ processed: 3, failed: 0, nextCursor: "" });
+    expect(inlineCalls).toBe(0);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toHaveLength(3);
+    expect(sent[0]?.[0]?.body).toEqual({
+      guildId: "100000000000000",
+      discordUserId: "200000000000001"
+    });
+  });
+
+  it("processes queue messages and retries unexpected failures", async () => {
+    const db = new SchedulerDb();
+    const retried: string[] = [];
+    const message = (userId: string) => ({
+      body: { guildId: "100000000000000", discordUserId: userId },
+      retry: () => {
+        retried.push(userId);
+      }
+    });
+    const batch = {
+      queue: "holder-role-sync",
+      messages: [message("200000000000001"), message("200000000000002")]
+    };
+
+    await processRoleSyncQueue(
+      createEnv(db),
+      batch as unknown as MessageBatch<RoleSyncQueueMessage>,
+      async (_env, _guildId, userId) => {
+        if (userId.endsWith("2")) throw new Error("Discord unavailable");
+        return emptySummary();
+      }
+    );
+
+    expect(retried.map((userId) => userId.slice(-1))).toEqual(["2"]);
   });
 });

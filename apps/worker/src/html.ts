@@ -425,6 +425,7 @@ export function managerPage(env: Env): string {
                   <option value="erc721-token">Exact NFT</option>
                   <option value="erc1155">ERC-1155 item balance</option>
                   <option value="spl-token">Solana token or NFT mint</option>
+                  <option value="solana-collection">Solana NFT collection</option>
                 </select>
               </div>
               <div>
@@ -507,6 +508,20 @@ export function managerPage(env: Env): string {
               <div class="form-actions"><button id="save-custom-chain" type="submit">Save network</button></div>
             </form>
             <div id="custom-chain-result" aria-live="polite"></div>
+            <h2>Optional NFT indexers</h2>
+            <p class="muted">Only needed for trait rules on very large or non-enumerable EVM collections and for collection-wide Solana NFT rules. Leave blank to keep using free direct network checks.</p>
+            <form id="indexer-form">
+              <label for="indexer-chain">Network</label>
+              <select id="indexer-chain"></select>
+              <label for="indexer-url">Indexer URL</label>
+              <input id="indexer-url" type="url" placeholder="https://eth-mainnet.g.alchemy.com/nft/v3/your-key">
+              <p class="muted" id="indexer-hint"></p>
+              <div class="form-actions">
+                <button id="save-indexer" type="submit">Save indexer</button>
+                <button id="remove-indexer" type="button" hidden>Remove indexer</button>
+              </div>
+            </form>
+            <div id="indexer-result" aria-live="polite"></div>
           </details>
         </section>
       </div>
@@ -558,6 +573,13 @@ export function managerPage(env: Env): string {
       const customChainForm = document.getElementById("custom-chain-form");
       const saveCustomChain = document.getElementById("save-custom-chain");
       const customChainResult = document.getElementById("custom-chain-result");
+      const indexerForm = document.getElementById("indexer-form");
+      const indexerChain = document.getElementById("indexer-chain");
+      const indexerUrl = document.getElementById("indexer-url");
+      const indexerHint = document.getElementById("indexer-hint");
+      const saveIndexer = document.getElementById("save-indexer");
+      const removeIndexer = document.getElementById("remove-indexer");
+      const indexerResult = document.getElementById("indexer-result");
       const token = new URLSearchParams(location.search).get("token");
       let data;
 
@@ -641,11 +663,11 @@ export function managerPage(env: Env): string {
         document.getElementById("trait-name").required = !traitFields.hidden;
         document.getElementById("trait-value").required = !traitFields.hidden;
         document.getElementById("minimum").required = !minimumFields.hidden;
-        document.getElementById("asset-address-label").textContent = type === "spl-token" ? "Token or NFT mint address" : "Contract address";
+        document.getElementById("asset-address-label").textContent = type === "spl-token" ? "Token or NFT mint address" : type === "solana-collection" ? "Collection address" : "Contract address";
       }
 
       function syncNetworkForRequirement() {
-        const family = typeInput.value === "spl-token" ? "solana" : "evm";
+        const family = typeInput.value === "spl-token" || typeInput.value === "solana-collection" ? "solana" : "evm";
         const selected = data && data.chains.find((chain) => chain.id === chainInput.value);
         if (!selected || selected.family !== family) {
           const compatible = data && data.chains.find((chain) => chain.family === family);
@@ -658,7 +680,7 @@ export function managerPage(env: Env): string {
         const selected = data && data.chains.find((chain) => chain.id === chainInput.value);
         if (selected && selected.family === "solana") {
           typeInput.value = "spl-token";
-        } else if (selected && selected.family === "evm" && typeInput.value === "spl-token") {
+        } else if (selected && selected.family === "evm" && (typeInput.value === "spl-token" || typeInput.value === "solana-collection")) {
           typeInput.value = "erc721";
         }
         updateFields();
@@ -718,6 +740,7 @@ export function managerPage(env: Env): string {
       function ruleSummary(rule) {
         const definition = rule.definition;
         if (definition.type === "spl-token") return "Hold " + definition.minAmount + " of Solana mint";
+        if (definition.type === "solana-collection") return "Own " + definition.minCount + " NFT(s) from Solana collection";
         if (definition.type === "erc721") return "Own " + definition.minCount + " NFT(s)";
         if (definition.type === "erc20") return "Hold " + definition.minAmount + " token(s)";
         if (definition.type === "erc721-trait") return "Own " + definition.minCount + " NFT(s) with " + definition.traitName + " = " + definition.traitValue;
@@ -788,7 +811,7 @@ export function managerPage(env: Env): string {
           description.textContent = ruleSummary(rule) + " on " + (chains.get(rule.chainId) || rule.chainId);
           const address = document.createElement("span");
           address.className = "muted";
-          address.textContent = rule.definition.contractAddress || rule.definition.mintAddress;
+          address.textContent = rule.definition.contractAddress || rule.definition.mintAddress || rule.definition.collectionAddress;
           copy.append(description, address);
           const remove = document.createElement("button");
           remove.type = "button";
@@ -846,6 +869,8 @@ export function managerPage(env: Env): string {
           data.chains = data.chains.filter((chain) => chain.id !== saved.chain.id);
           data.chains.push(saved.chain);
           setOptions(chainInput, data.chains);
+          setOptions(indexerChain, data.chains);
+          renderIndexerForm();
           updateFields();
           customChainForm.reset();
           customChainResult.className = "success";
@@ -855,6 +880,60 @@ export function managerPage(env: Env): string {
           customChainResult.textContent = error instanceof Error ? error.message : "Network could not be saved.";
         } finally {
           saveCustomChain.disabled = false;
+        }
+      });
+      function renderIndexerForm() {
+        const chain = data && data.chains.find((item) => item.id === indexerChain.value);
+        const existing = data && (data.indexers || []).find((item) => item.chainId === indexerChain.value);
+        if (chain) {
+          indexerHint.textContent = chain.family === "solana"
+            ? "Use a DAS-capable Solana RPC URL, for example a Helius endpoint like https://mainnet.helius-rpc.com/?api-key=YOUR-KEY."
+            : "Use an Alchemy NFT API URL for this network, for example https://eth-mainnet.g.alchemy.com/nft/v3/YOUR-KEY.";
+        }
+        indexerUrl.value = existing ? existing.url : "";
+        removeIndexer.hidden = !existing;
+      }
+      indexerChain.addEventListener("change", renderIndexerForm);
+      indexerForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        saveIndexer.disabled = true;
+        indexerResult.className = "";
+        indexerResult.textContent = "Saving indexer...";
+        try {
+          const saved = await api("chain-indexer", {
+            method: "PUT",
+            body: JSON.stringify({ chainId: indexerChain.value, url: indexerUrl.value.trim() })
+          });
+          data.indexers = (data.indexers || []).filter((item) => item.chainId !== saved.indexer.chainId);
+          data.indexers.push(saved.indexer);
+          renderIndexerForm();
+          indexerResult.className = "success";
+          indexerResult.textContent = "Indexer saved. New and refreshed holder checks will use it.";
+        } catch (error) {
+          indexerResult.className = "error";
+          indexerResult.textContent = error instanceof Error ? error.message : "Indexer could not be saved.";
+        } finally {
+          saveIndexer.disabled = false;
+        }
+      });
+      removeIndexer.addEventListener("click", async () => {
+        removeIndexer.disabled = true;
+        indexerResult.className = "";
+        indexerResult.textContent = "Removing indexer...";
+        try {
+          await api("chain-indexer", {
+            method: "DELETE",
+            body: JSON.stringify({ chainId: indexerChain.value })
+          });
+          data.indexers = (data.indexers || []).filter((item) => item.chainId !== indexerChain.value);
+          renderIndexerForm();
+          indexerResult.className = "success";
+          indexerResult.textContent = "Indexer removed. Free direct network checks are back in use.";
+        } catch (error) {
+          indexerResult.className = "error";
+          indexerResult.textContent = error instanceof Error ? error.message : "Indexer could not be removed.";
+        } finally {
+          removeIndexer.disabled = false;
         }
       });
       function accentTextColor(color) {
@@ -1181,6 +1260,8 @@ export function managerPage(env: Env): string {
         data = await api("session");
         setOptions(roleInput, data.roles);
         setOptions(chainInput, data.chains);
+        setOptions(indexerChain, data.chains);
+        renderIndexerForm();
         syncMatchModeForRole();
         document.getElementById("community-name").value = data.branding.name;
         document.getElementById("accent-color").value = data.branding.accentColor;

@@ -1,3 +1,8 @@
+export type RoleSyncQueueMessage = {
+  guildId: string;
+  discordUserId: string;
+};
+
 export interface Env {
   DB: D1Database;
   APP_NAME: string;
@@ -5,6 +10,7 @@ export interface Env {
   DAILY_CLAIM_AMOUNT?: string;
   DISCORD_BOT_TOKEN: string;
   SETUP_TOKEN?: string;
+  ROLE_SYNC_QUEUE?: Queue<RoleSyncQueueMessage>;
 }
 
 export type DiscordInteraction = {

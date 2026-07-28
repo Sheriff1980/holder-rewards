@@ -12,6 +12,7 @@ import {
   type Address
 } from "viem";
 import { listChains } from "./chains.js";
+import { fetchDasCollectionAssets, fetchIndexedNftsForOwner, getIndexerUrl } from "./indexers.js";
 import type { Env } from "./types.js";
 import { loadTokenAttributes, metadataHasTrait } from "./metadata.js";
 import { isSolanaAddress, solanaTokenQualifies } from "./solana.js";
@@ -52,11 +53,17 @@ export type EvmRoleRule =
       minCount: number;
     };
 
-export type SolanaRoleRule = {
-  type: "spl-token";
-  mintAddress: string;
-  minAmount: string;
-};
+export type SolanaRoleRule =
+  | {
+      type: "spl-token";
+      mintAddress: string;
+      minAmount: string;
+    }
+  | {
+      type: "solana-collection";
+      collectionAddress: string;
+      minCount: number;
+    };
 
 export type RoleRuleDefinition = EvmRoleRule | SolanaRoleRule;
 export type RuleMatchMode = "any" | "all";
@@ -194,6 +201,25 @@ function parseStoredRule(row: RoleRuleRow): RoleRuleRecord | null {
         definition: definition as SolanaRoleRule
       };
     }
+    if (definition.type === "solana-collection") {
+      if (
+        typeof definition.collectionAddress !== "string" ||
+        !isSolanaAddress(definition.collectionAddress) ||
+        !Number.isSafeInteger(definition.minCount) ||
+        Number(definition.minCount) < 1
+      ) {
+        return null;
+      }
+      return {
+        id: row.id,
+        guildId: row.guild_id,
+        roleId: row.role_id,
+        chainId: row.chain,
+        matchMode: row.match_mode === "all" ? "all" : "any",
+        rewardMultiplier: Number.isSafeInteger(row.reward_multiplier) ? Number(row.reward_multiplier) : 1,
+        definition: definition as SolanaRoleRule
+      };
+    }
     if (
       (definition.type !== "erc721" &&
         definition.type !== "erc20" &&
@@ -273,7 +299,7 @@ export async function addRoleRule(
     guildId: unknown;
     roleId: unknown;
     chainId: unknown;
-    type: "erc721" | "erc20" | "erc721-trait" | "erc721-token" | "erc1155" | "spl-token";
+    type: "erc721" | "erc20" | "erc721-trait" | "erc721-token" | "erc1155" | "spl-token" | "solana-collection";
     contractAddress: unknown;
     minimum: unknown;
     traitName?: unknown;
@@ -288,7 +314,7 @@ export async function addRoleRule(
   if (roleId === guildId) throw new RuleError("The @everyone role cannot be managed by a holder rule.");
   if (typeof input.chainId !== "string") throw new RuleError("Chain is required.");
   const chain = (await listChains(env)).find((candidate) => candidate.id === input.chainId);
-  const expectedFamily = input.type === "spl-token" ? "solana" : "evm";
+  const expectedFamily = input.type === "spl-token" || input.type === "solana-collection" ? "solana" : "evm";
   if (!chain || chain.family !== expectedFamily) {
     throw new RuleError(`Choose an enabled ${expectedFamily === "solana" ? "Solana" : "EVM"} chain.`);
   }
@@ -326,6 +352,20 @@ export async function addRoleRule(
       throw new RuleError("Solana token minimum must be a positive decimal amount.");
     }
     definition = { type: "spl-token", mintAddress: input.contractAddress, minAmount };
+  } else if (input.type === "solana-collection") {
+    if (!isSolanaAddress(input.contractAddress)) {
+      throw new RuleError("Collection must be a valid Solana address.");
+    }
+    const minCount = Number(input.minimum);
+    if (!Number.isSafeInteger(minCount) || minCount < 1 || minCount > 1_000_000) {
+      throw new RuleError("NFT minimum must be a whole number between 1 and 1,000,000.");
+    }
+    if (!(await getIndexerUrl(env, chain.id))) {
+      throw new RuleError(
+        "Collection-wide Solana rules need a Solana indexer (DAS) URL first. Add one under Advanced network settings in this manager."
+      );
+    }
+    definition = { type: "solana-collection", collectionAddress: input.contractAddress, minCount };
   } else {
     const contractAddress = requireContract(input.contractAddress);
     if (input.type === "erc721" || input.type === "erc721-trait") {
@@ -499,7 +539,7 @@ async function evaluateRule(
   rpcUrl: string,
   expectedChainId: number
 ): Promise<RuleOutcome> {
-  if (rule.definition.type === "spl-token") {
+  if (rule.definition.type === "spl-token" || rule.definition.type === "solana-collection") {
     return { rule, error: "A Solana rule cannot be evaluated by an EVM provider." };
   }
   const definition = rule.definition as EvmRoleRule;
@@ -571,6 +611,20 @@ async function evaluateRule(
 
     if (rule.definition.type === "erc721-trait") {
       const traitRule = rule.definition;
+      if (total > 0n) {
+        const indexerUrl = await getIndexerUrl(env, rule.chainId);
+        if (indexerUrl) {
+          let indexed = 0;
+          for (const wallet of walletAddresses) {
+            const nfts = await fetchIndexedNftsForOwner(indexerUrl, wallet, traitRule.contractAddress);
+            indexed += nfts.filter((nft) =>
+              metadataHasTrait(nft.attributes, traitRule.traitName, traitRule.traitValue)
+            ).length;
+            if (indexed >= traitRule.minCount) break;
+          }
+          return { rule, qualifies: indexed >= traitRule.minCount, balance: indexed.toString() };
+        }
+      }
       const ownershipSlots: Array<{ address: Address; index: bigint }> = [];
       for (let walletIndex = 0; walletIndex < walletAddresses.length; walletIndex += 1) {
         const balance = balances[walletIndex] ?? 0n;
@@ -656,10 +710,32 @@ async function evaluateRule(
 }
 
 async function evaluateSolanaRule(
+  env: Env,
   rule: RoleRuleRecord,
   walletAddresses: string[],
   rpcUrl: string
 ): Promise<RuleOutcome> {
+  if (rule.definition.type === "solana-collection") {
+    if (walletAddresses.length === 0) return { rule, qualifies: false, balance: "0" };
+    try {
+      const indexerUrl = await getIndexerUrl(env, rule.chainId);
+      if (!indexerUrl) {
+        return { rule, error: "No Solana indexer (DAS) URL is configured." };
+      }
+      const assets = await fetchDasCollectionAssets(
+        indexerUrl,
+        walletAddresses,
+        rule.definition.collectionAddress
+      );
+      return {
+        rule,
+        qualifies: assets.length >= rule.definition.minCount,
+        balance: assets.length.toString()
+      };
+    } catch (error) {
+      return { rule, error: error instanceof Error ? error.message : "Solana indexer request failed." };
+    }
+  }
   if (rule.definition.type !== "spl-token") {
     return { rule, error: "An EVM rule cannot be evaluated by a Solana provider." };
   }
@@ -841,7 +917,7 @@ export async function syncMemberRoles(
       }
       let outcome: RuleOutcome;
       if (chain.family === "solana") {
-        outcome = await evaluateSolanaRule(rule, solanaWallets, rpcUrl);
+        outcome = await evaluateSolanaRule(env, rule, solanaWallets, rpcUrl);
       } else {
         const numericChainId = Number(chain.chainReference);
         outcome = Number.isSafeInteger(numericChainId)

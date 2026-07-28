@@ -38,7 +38,7 @@ Manager exports require a short-lived private manager session and are returned w
 
 ### RPC and Metadata Poisoning
 
-RPC endpoints and NFT metadata can return false or malicious data. Contract calls are pinned to the configured chain ID, metadata fetches are bounded, and metadata is treated as data rather than executable content. Operators adding custom networks are responsible for selecting trustworthy HTTPS RPC endpoints. Multi-provider consensus is not currently implemented.
+RPC endpoints and NFT metadata can return false or malicious data. Contract calls are pinned to the configured chain ID, metadata fetches are bounded, and metadata is treated as data rather than executable content. Operators adding custom networks are responsible for selecting trustworthy HTTPS RPC endpoints. Optional NFT indexer URLs may contain API keys; they are stored in the deployment database as configuration, are visible to anyone holding a private manager link, and answer ownership questions authoritatively for the chains they are attached to. Choose reputable indexer providers, prefer restrictable keys, and rotate any key that may have leaked. Multi-provider consensus is not currently implemented.
 
 ### Reward Farming
 

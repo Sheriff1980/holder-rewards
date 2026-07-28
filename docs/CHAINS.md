@@ -15,7 +15,16 @@ Holder Rewards separates a chain's identity from the adapter that knows how to c
 
 The defaults are public endpoints intended for setup and light community traffic. Public RPC endpoints may be rate-limited; a failed ownership check leaves existing roles unchanged. Exact Solana mint/SPL-token checks use a keyless public RPC without another account or key. The manager automatically checks every enabled provider and offers a one-click retry when a network is unavailable.
 
-Built-in provider overrides are not part of the first release. A manager can add another EVM-compatible network with its own public RPC under **Advanced network settings**. Provider URLs containing private API keys should not be stored there.
+A manager can add another EVM-compatible network with its own public RPC under **Advanced network settings**. Provider URLs containing private API keys should not be stored in the chain registry; keyed indexer endpoints have their own designated configuration below.
+
+## Optional NFT Indexers
+
+Everything in the default path works keyless. Two optional capabilities unlock when a manager pastes an indexer URL for a chain under `/rules manage` → **Advanced network settings**:
+
+- **EVM NFT API (Alchemy-compatible).** Trait rules then work on large wallets and non-enumerable ERC-721 collections that the bounded direct-RPC scan cannot cover. Use the network's NFT API base URL, for example `https://eth-mainnet.g.alchemy.com/nft/v3/<your-key>`. Any provider serving the same `getNFTsForOwner` shape works.
+- **Solana DAS endpoint.** Enables collection-wide Solana NFT rules ("own at least N items from this verified collection"). Use a DAS-capable RPC URL, for example a Helius endpoint such as `https://mainnet.helius-rpc.com/?api-key=<your-key>`. Any provider serving `getAssetsByOwner` works.
+
+Indexer URLs may contain API keys. They are stored in the deployment's `indexer_configs` table as configuration, not as encrypted secrets, and are visible to anyone holding a private manager link for the deployment. Keep manager links private, prefer provider dashboards that allow key restrictions, and rotate a key if it may have leaked. The manager health check probes configured indexers alongside RPC providers and offers one-click retry.
 
 ## Custom Chains
 
@@ -45,11 +54,11 @@ Example EVM definition:
 
 Use `GET /api/chains` to retrieve built-in and enabled custom definitions.
 
-RPC URLs stored in the registry are configuration, not encrypted secrets. Do not place provider API keys, usernames, or passwords in these URLs. Provider credentials will use deployment secrets and adapter-specific configuration.
+RPC URLs stored in the registry are configuration, not encrypted secrets. Do not place provider API keys, usernames, or passwords in these URLs; keyed endpoints belong in the optional indexer configuration above.
 
 ## Adding a New Family
 
-New EVM-compatible networks can use the current adapter. Solana already implements signature verification and exact mint balances. Collection-wide Solana NFTs and genuinely different chain families still require adapters implementing:
+New EVM-compatible networks can use the current adapter. Solana already implements signature verification, exact mint balances, and collection-wide NFT checks through a replaceable DAS adapter. Genuinely different chain families still require adapters implementing:
 
 - Wallet signature verification.
 - NFT ownership lookup.

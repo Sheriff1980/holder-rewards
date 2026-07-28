@@ -8,6 +8,7 @@ dist/
 !.dev.vars.example
 coverage/
 .turbo/
+TODO.md
 .wrangler/
 .playwright-cli/
 output/

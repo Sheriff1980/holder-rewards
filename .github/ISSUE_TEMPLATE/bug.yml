@@ -13,7 +13,6 @@ body:
       label: Deployment
       options:
         - Cloudflare Worker
-        - Docker
         - Local development
         - Other self-hosted setup
     validations:

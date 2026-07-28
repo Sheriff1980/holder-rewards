@@ -24,4 +24,11 @@
   "triggers": {
     "crons": ["7,22,37,52 * * * *"]
   }
+  // Optional high-volume role sync (requires a Workers Paid plan):
+  // 1. Create the queue: npx wrangler queues create holder-role-sync
+  // 2. Uncomment the block below and redeploy.
+  // "queues": {
+  //   "producers": [{ "binding": "ROLE_SYNC_QUEUE", "queue": "holder-role-sync" }],
+  //   "consumers": [{ "queue": "holder-role-sync", "max_batch_size": 10, "max_retries": 2 }]
+  // }
 }

@@ -24,7 +24,6 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "db:migrate": "pnpm --filter @holder-rewards/db migrate",
     "db:migrate:cloudflare": "wrangler d1 migrations apply DB --remote"
   },
   "cloudflare": {

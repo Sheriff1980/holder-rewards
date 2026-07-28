@@ -1,5 +1,5 @@
 import { syncMemberRoles, type RoleSyncSummary } from "./rules.js";
-import type { Env } from "./types.js";
+import type { Env, RoleSyncQueueMessage } from "./types.js";
 
 const MAX_MEMBERS_PER_RUN = 10;
 const MAX_RUN_TIME_MS = 45_000;
@@ -82,6 +82,15 @@ async function recordResult(
     .run();
 }
 
+async function saveCursor(env: Env, cursor: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
+  )
+    .bind(CURSOR_KEY, cursor)
+    .run();
+}
+
 export async function runScheduledRoleSync(
   env: Env,
   syncMember: SyncMember = syncMemberRoles,
@@ -98,6 +107,24 @@ export async function runScheduledRoleSync(
   if (memberships.length === 0 && cursor) {
     cursor = "";
     memberships = await loadBatch(env, cursor);
+  }
+
+  if (env.ROLE_SYNC_QUEUE) {
+    if (memberships.length > 0) {
+      await env.ROLE_SYNC_QUEUE.sendBatch(
+        memberships.map((membership) => ({
+          body: {
+            guildId: membership.guild_id,
+            discordUserId: membership.discord_user_id
+          }
+        }))
+      );
+      cursor = memberships.length < MAX_MEMBERS_PER_RUN
+        ? ""
+        : memberships[memberships.length - 1]!.cursor_value;
+      await saveCursor(env, cursor);
+    }
+    return { processed: memberships.length, failed: 0, nextCursor: cursor };
   }
 
   let processed = 0;
@@ -130,14 +157,30 @@ export async function runScheduledRoleSync(
   if (processed === memberships.length && memberships.length < MAX_MEMBERS_PER_RUN) {
     cursor = "";
   }
-  await env.DB.prepare(
-    `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
-  )
-    .bind(CURSOR_KEY, cursor)
-    .run();
+  await saveCursor(env, cursor);
 
   return { processed, failed, nextCursor: cursor };
+}
+
+export async function processRoleSyncQueue(
+  env: Env,
+  batch: MessageBatch<RoleSyncQueueMessage>,
+  syncMember: SyncMember = syncMemberRoles
+): Promise<void> {
+  for (const message of batch.messages) {
+    const timestamp = new Date().toISOString();
+    const membership: MembershipRow = {
+      guild_id: message.body.guildId,
+      discord_user_id: message.body.discordUserId,
+      cursor_value: ""
+    };
+    try {
+      const summary = await syncMember(env, membership.guild_id, membership.discord_user_id);
+      await recordResult(env, membership, summarizeErrors(summary), timestamp);
+    } catch {
+      message.retry();
+    }
+  }
 }
 
 export async function retryFailedRoleSyncs(

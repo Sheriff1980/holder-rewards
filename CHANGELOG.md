@@ -4,6 +4,17 @@ All notable changes to Holder Rewards will be documented here. The project follo
 
 ## Unreleased
 
+### Added
+
+- Optional per-chain NFT indexers managed from the browser manager's advanced network settings: Alchemy-compatible NFT APIs unlock EVM trait rules on large or non-enumerable collections, and DAS-compatible endpoints (for example Helius) enable collection-wide Solana NFT rules.
+- `solana-collection` holder rule type for owning a minimum number of NFTs from a verified Solana collection across linked wallets.
+- Indexer health checks with one-click retry in the manager.
+- Optional Cloudflare Queues offload for high-volume scheduled holder revalidation via a `ROLE_SYNC_QUEUE` binding; the default free-tier cron batching is unchanged.
+
+### Removed
+
+- Removed the unfinished Docker/Postgres/Gateway development scaffold (`apps/bot`, `apps/web`, `packages/db`, `packages/core`, `packages/env`, `Dockerfile`, `docker-compose.yml`, `.env.docker.example`). The browser-only Cloudflare Worker + D1 deployment is the single supported path.
+
 ## 0.2.0 - 2026-07-23
 
 ### Changed

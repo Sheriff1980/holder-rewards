@@ -13,8 +13,6 @@ pnpm exec wrangler d1 migrations apply DB --local
 pnpm dev:cloudflare
 ```
 
-For the advanced Node/Docker services, copy `.env.docker.example` to `.env` and run `pnpm dev` with Postgres available.
-
 Before opening a pull request:
 
 ```bash

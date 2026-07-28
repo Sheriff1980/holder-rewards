@@ -29,6 +29,8 @@ The hosted foundation is working. It currently provides:
 - Manager-only `/rules` commands for EVM NFT/token requirements and exact Solana mint balances.
 - A private browser manager launched by `/rules manage`, with Discord role and network dropdowns.
 - Direct-metadata trait rules for enumerable ERC-721 collections, with bounded scans and a D1 cache.
+- Optional per-chain NFT indexers for trait rules on large or non-enumerable EVM collections (Alchemy-compatible NFT APIs).
+- Collection-wide Solana NFT rules through a replaceable DAS indexer endpoint such as Helius.
 - Exact ERC-721 token-ID and ERC-1155 token-ID balance rules without an indexer.
 - Additive multi-role synchronization across every linked EVM and Solana wallet, including safe role removal.
 - Per-role Any/All requirement groups that can combine NFTs, traits, fungible tokens, and different chains.
@@ -41,12 +43,12 @@ The hosted foundation is working. It currently provides:
 - Private one-click CSV exports for verified holders, reward balances, wallet links, and audit history.
 - Per-server wallet privacy controls that shorten manager exports by default and require explicit opt-in for full addresses.
 - Rolling scheduled holder revalidation with persistent per-server membership and failure records.
+- Optional Cloudflare Queues offload for high-volume scheduled revalidation; the free-tier cron batching remains the default.
 - Short-lived ownership-result caching that reduces public RPC calls while manual refresh remains authoritative.
 - A working chain registry with Ethereum, Base, Polygon, Arbitrum One, ApeChain, Solana, and custom EVM networks.
 - A protected optional API for adding future EVM-compatible chains without changing core logic.
-- A scaffolded advanced Docker/Postgres/Gateway-bot path for future persistent features.
 
-EVM wallet linking supports EIP-6963 multi-wallet discovery, provider-neutral mobile wallet-browser handoff, browser-injected EOA wallets, and EIP-1271 contract signatures on configured networks. Solana linking supports Wallet Standard plus common injected wallets and verifies the exact challenge with Ed25519. Direct-RPC EVM holder roles, exact Solana mint/SPL-token balances, and per-role Any/All groups work without an indexer or additional provider key. Counterfactual smart accounts, collection-wide Solana NFT grouping, non-enumerable EVM collection indexers, higher-volume queues, quests, stores, and nested rule groups remain under development.
+EVM wallet linking supports EIP-6963 multi-wallet discovery, provider-neutral mobile wallet-browser handoff, browser-injected EOA wallets, and EIP-1271 contract signatures on configured networks. Solana linking supports Wallet Standard plus common injected wallets and verifies the exact challenge with Ed25519. Direct-RPC EVM holder roles, exact Solana mint/SPL-token balances, and per-role Any/All groups work without an indexer or additional provider key. Counterfactual smart accounts, quests, stores, and nested rule groups remain under development.
 
 ## Deployment Choices
 
@@ -78,17 +80,6 @@ See [updates and recovery](docs/UPGRADES_AND_RECOVERY.md) for D1 migrations, bac
 
 The [Cloudflare release notes](docs/CLOUDFLARE.md) are for project developers maintaining the public deployment template. They are not operator setup instructions.
 
-### Docker Development Scaffold
-
-The Docker path runs the Gateway bot, web service, Postgres, Redis, and database migration job:
-
-```bash
-cp .env.docker.example .env
-docker compose up --build
-```
-
-This is an unfinished developer scaffold for future persistent Discord Gateway features. It is not a supported production deployment path. Use the browser-only Cloudflare template for the working holder-verification and rewards framework.
-
 ### Local Development
 
 Requirements: Node.js 22+ and pnpm 9+.
@@ -105,13 +96,8 @@ Wrangler prints the local URL. The default is usually `http://localhost:8787`.
 ## Repository Layout
 
 - `apps/worker`: recommended serverless Discord/web application.
-- `apps/bot`: persistent Discord Gateway bot for advanced hosting.
-- `apps/web`: Fastify web/API service for advanced hosting.
 - `migrations`: Cloudflare D1 migrations.
-- `packages/db`: Postgres client and migration runner.
 - `packages/chains`: replaceable wallet and ownership adapters.
-- `packages/core`: holder rules and rewards logic.
-- `packages/env`: environment validation for the Node deployment.
 
 ## Verification
 
@@ -120,7 +106,6 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm --filter @holder-rewards/web smoke
 ```
 
 ## Free-Hosting Goal

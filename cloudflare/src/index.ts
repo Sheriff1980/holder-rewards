@@ -5,8 +5,14 @@ import {
   verifyDiscordRequest
 } from "./discord.js";
 import { listChains, parseCustomChain, saveCustomChain } from "./chains.js";
+import {
+  IndexerConfigError,
+  listIndexerConfigs,
+  removeIndexerConfig,
+  saveIndexerConfig
+} from "./indexers.js";
 import { managerPage, setupPage, verifyPage } from "./html.js";
-import type { DiscordInteraction, Env } from "./types.js";
+import type { DiscordInteraction, Env, RoleSyncQueueMessage } from "./types.js";
 import { AdminError, listManageableDiscordRoles, requireAdminSession } from "./admin.js";
 import {
   completeWalletChallenge,
@@ -25,7 +31,7 @@ import {
   updateRoleMatchMode,
   updateRoleRewardMultiplier
 } from "./rules.js";
-import { retryFailedRoleSyncs, runScheduledRoleSync } from "./scheduler.js";
+import { processRoleSyncQueue, retryFailedRoleSyncs, runScheduledRoleSync } from "./scheduler.js";
 import { getRewardSettings, RewardSettingsError, updateRewardSettings } from "./points.js";
 import {
   AssetError,
@@ -257,13 +263,13 @@ async function verificationApiResponse(request: Request, env: Env, action: strin
   return jsonResponse({ error: "Not found" }, 404);
 }
 
-const ruleTypes = new Set(["erc721", "erc20", "erc721-trait", "erc721-token", "erc1155", "spl-token"]);
+const ruleTypes = new Set(["erc721", "erc20", "erc721-trait", "erc721-token", "erc1155", "spl-token", "solana-collection"]);
 
 async function managerApiResponse(request: Request, env: Env, path: string): Promise<Response> {
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, hasIcon, hasLogo] = await Promise.all([
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, hasIcon, hasLogo] = await Promise.all([
         listChains(env),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
@@ -271,6 +277,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         getGuildBranding(env, session.guild_id),
         getGuildOperations(env, session.guild_id),
         getWalletPrivacySettings(env, session.guild_id),
+        listIndexerConfigs(env),
         hasCurrencyIcon(env, session.guild_id),
         hasBrandLogo(env, session.guild_id)
       ]);
@@ -283,6 +290,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         branding,
         operations,
         privacy,
+        indexers,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
           : null,
@@ -444,6 +452,32 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
       return jsonResponse({ ok: true, chain: parsed.chain }, 201);
     }
 
+    if (request.method === "PUT" && path === "chain-indexer") {
+      const input = (await request.json()) as Record<string, unknown>;
+      const indexer = await saveIndexerConfig(env, { chainId: input.chainId, url: input.url });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "indexer_config_saved",
+        detail: `Indexer configured for ${indexer.chainId}`
+      });
+      return jsonResponse({ ok: true, indexer });
+    }
+
+    if (request.method === "DELETE" && path === "chain-indexer") {
+      const input = (await request.json()) as Record<string, unknown>;
+      const removed = await removeIndexerConfig(env, input.chainId);
+      if (removed) await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "indexer_config_removed",
+        detail: `Indexer removed for ${String(input.chainId)}`
+      });
+      return removed
+        ? jsonResponse({ ok: true })
+        : jsonResponse({ error: "That chain has no indexer configured." }, 404);
+    }
+
     if (request.method === "POST" && path === "rules") {
       const input = (await request.json()) as Record<string, unknown>;
       if (typeof input.type !== "string" || !ruleTypes.has(input.type)) {
@@ -457,7 +491,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         guildId: session.guild_id,
         roleId: input.roleId,
         chainId: input.chainId,
-        type: input.type as "erc721" | "erc20" | "erc721-trait" | "erc721-token" | "erc1155" | "spl-token",
+        type: input.type as "erc721" | "erc20" | "erc721-trait" | "erc721-token" | "erc1155" | "spl-token" | "solana-collection",
         contractAddress: input.contractAddress,
         minimum: input.minimum,
         traitName: input.traitName,
@@ -541,6 +575,9 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
       return jsonResponse({ error: error.message }, error.status);
     }
     if (error instanceof BrandingError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof IndexerConfigError) {
       return jsonResponse({ error: error.message }, 400);
     }
     if (error instanceof SyntaxError) {
@@ -669,5 +706,8 @@ export default {
       .first<{ value: string }>();
     if (origin?.value) await ensureDiscordSetup(env, origin.value);
     await runScheduledRoleSync(env);
+  },
+  async queue(batch: MessageBatch<RoleSyncQueueMessage>, env: Env): Promise<void> {
+    await processRoleSyncQueue(env, batch);
   }
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, RoleSyncQueueMessage>;

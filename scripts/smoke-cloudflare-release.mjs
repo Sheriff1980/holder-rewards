@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -92,8 +92,11 @@ try {
     throw new Error("The standalone chain registry did not include ApeChain and Solana.");
   }
 
+  const migrationCount = (await readdir(join(app, "migrations"))).filter((name) =>
+    name.endsWith(".sql")
+  ).length;
   process.stdout.write(
-    "Standalone Cloudflare release passed clean install, 18 migrations, boot, health, setup-page, and chain-registry checks.\n"
+    `Standalone Cloudflare release passed clean install, ${migrationCount} migrations, boot, health, setup-page, and chain-registry checks.\n`
   );
 } finally {
   if (worker && worker.exitCode === null) {

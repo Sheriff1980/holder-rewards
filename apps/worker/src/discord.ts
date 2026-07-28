@@ -771,6 +771,9 @@ export async function handleDiscordInteraction(
             case "spl-token":
               minimum = `${rule.definition.minAmount} of Solana mint ${rule.definition.mintAddress}`;
               break;
+            case "solana-collection":
+              minimum = `${rule.definition.minCount} NFT(s) from Solana collection`;
+              break;
             case "erc721":
               minimum = `${rule.definition.minCount} NFT(s)`;
               break;
@@ -789,7 +792,9 @@ export async function handleDiscordInteraction(
           }
           const assetAddress = rule.definition.type === "spl-token"
             ? rule.definition.mintAddress
-            : rule.definition.contractAddress;
+            : rule.definition.type === "solana-collection"
+              ? rule.definition.collectionAddress
+              : rule.definition.contractAddress;
           return `- [${rule.matchMode.toUpperCase()}] ${rule.id}: <@&${rule.roleId}> for ${minimum} on ${rule.chainId} at ${assetAddress}`;
         });
         return ephemeralMessage(`Enabled holder rules:\n${lines.join("\n")}`.slice(0, 1_990));
