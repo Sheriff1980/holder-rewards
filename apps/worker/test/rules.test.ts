@@ -4,6 +4,7 @@ import {
   decideRoleAction,
   isUint256,
   syncMemberRoles,
+  updateGroupMatchMode,
   updateRoleMatchMode,
   updateRoleRewardMultiplier
 } from "../src/rules.js";
@@ -111,6 +112,25 @@ describe("holder reward multipliers", () => {
       updateRoleRewardMultiplier(env, "123456789012345678", "223456789012345678", 3)
     ).resolves.toBe(3);
     expect(bound).toEqual([3, "123456789012345678", "223456789012345678"]);
+  });
+
+  it("updates every active requirement in one group", async () => {
+    let bound: unknown[] = [];
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: (...values: unknown[]) => {
+            bound = values;
+            return { run: async () => ({ success: true, meta: { changes: 2 } }) };
+          }
+        })
+      }
+    } as unknown as Env;
+
+    await expect(
+      updateGroupMatchMode(env, "123456789012345678", "223456789012345678", "Blue chips", "all")
+    ).resolves.toEqual({ groupKey: "Blue chips", matchMode: "all" });
+    expect(bound).toEqual(["all", "123456789012345678", "223456789012345678", "Blue chips"]);
   });
 
   it("rejects unsafe multiplier values", async () => {
@@ -346,5 +366,108 @@ describe("ownership cache keys", () => {
     await expect(
       buildOwnershipCacheKey(rule, "mainnet-beta", "https://api.mainnet-beta.solana.com", ["wallet-b"])
     ).resolves.not.toBe(baseline);
+  });
+});
+
+describe("nested requirement groups", () => {
+  const GUILD = "123456789012345678";
+  const ROLE = "223456789012345678";
+  const USER = "323456789012345678";
+  const WALLET = "0x00000000000000000000000000000000000000ff";
+  const CONTRACT_A1 = "0x00000000000000000000000000000000000000a1";
+  const CONTRACT_A2 = "0x00000000000000000000000000000000000000a2";
+  const CONTRACT_B1 = "0x00000000000000000000000000000000000000b1";
+
+  function groupRule(id: string, contract: string, groupKey: string, groupMode: string) {
+    return {
+      id,
+      guild_id: GUILD,
+      role_id: ROLE,
+      chain: "ethereum",
+      match_mode: "all",
+      group_key: groupKey,
+      group_match_mode: groupMode,
+      reward_multiplier: 1,
+      rule: JSON.stringify({ type: "erc721", contractAddress: contract, minCount: 1 })
+    };
+  }
+
+  function groupEnv() {
+    return {
+      APP_NAME: "Holder Rewards",
+      DISCORD_BOT_TOKEN: "test-token",
+      DB: {
+        prepare: (sql: string) => {
+          const statement = {
+            all: async () => {
+              if (sql.includes("enabled = 1 ORDER BY")) {
+                return {
+                  results: [
+                    groupRule("rule-a1", CONTRACT_A1, "Blue chips", "any"),
+                    groupRule("rule-a2", CONTRACT_A2, "Blue chips", "any"),
+                    groupRule("rule-b1", CONTRACT_B1, "Passes", "all")
+                  ]
+                };
+              }
+              if (sql.includes("SELECT DISTINCT retired.role_id")) return { results: [] };
+              if (sql.includes("FROM wallets")) return { results: [{ chain: "evm", address: WALLET }] };
+              if (sql.includes("FROM chain_configs")) return { results: [] };
+              throw new Error(`Unexpected query: ${sql}`);
+            },
+            first: async () => null,
+            run: async () => ({ success: true, meta: { changes: 1 } }),
+            bind: () => statement
+          };
+          return statement;
+        }
+      }
+    } as unknown as Env;
+  }
+
+  function stubRpcAndDiscord(balances: Map<string, bigint>, added: string[]) {
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "PUT") {
+        added.push(url);
+        return new Response(null, { status: 204 });
+      }
+      if (init?.method === "POST") {
+        const requests = JSON.parse(String(init.body)) as
+          | Array<{ id: number; method: string; params?: Array<{ to?: string }> }>
+          | { id: number; method: string; params?: Array<{ to?: string }> };
+        const reply = (request: { id: number; method: string; params?: Array<{ to?: string }> }) => {
+          if (request.method === "eth_chainId") return { jsonrpc: "2.0", id: request.id, result: "0x1" };
+          const balance = balances.get(request.params?.[0]?.to ?? "") ?? 0n;
+          return {
+            jsonrpc: "2.0",
+            id: request.id,
+            result: `0x${balance.toString(16).padStart(64, "0")}`
+          };
+        };
+        return Array.isArray(requests)
+          ? Response.json(requests.map(reply))
+          : Response.json(reply(requests));
+      }
+      return Response.json({ roles: [] });
+    });
+  }
+
+  it("qualifies when every group passes: (A1 OR A2) AND B1", async () => {
+    const added: string[] = [];
+    stubRpcAndDiscord(new Map([[CONTRACT_A2, 2n], [CONTRACT_B1, 1n]]), added);
+    const summary = await syncMemberRoles(groupEnv(), GUILD, USER, { bypassOwnershipCache: true });
+    expect(summary.qualified).toEqual([ROLE]);
+    expect(summary.added).toEqual([ROLE]);
+    expect(added[0]).toContain(`/roles/${ROLE}`);
+  });
+
+  it("does not qualify when a required group fails", async () => {
+    const added: string[] = [];
+    stubRpcAndDiscord(new Map([[CONTRACT_A2, 2n]]), added);
+    const summary = await syncMemberRoles(groupEnv(), GUILD, USER, { bypassOwnershipCache: true });
+    expect(summary.qualified).toEqual([]);
+    expect(summary.added).toEqual([]);
+    expect(summary.unchanged).toEqual([ROLE]);
+    expect(added).toHaveLength(0);
   });
 });

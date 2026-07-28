@@ -74,6 +74,8 @@ export type RoleRuleRecord = {
   roleId: string;
   chainId: string;
   matchMode: RuleMatchMode;
+  groupKey: string;
+  groupMatchMode: RuleMatchMode;
   rewardMultiplier: number;
   definition: RoleRuleDefinition;
 };
@@ -84,6 +86,8 @@ type RoleRuleRow = {
   role_id: string;
   chain: string;
   match_mode: string;
+  group_key?: string;
+  group_match_mode?: string;
   reward_multiplier?: number;
   rule: string;
 };
@@ -197,6 +201,12 @@ function parseStoredRule(row: RoleRuleRow): RoleRuleRecord | null {
         roleId: row.role_id,
         chainId: row.chain,
         matchMode: row.match_mode === "all" ? "all" : "any",
+        groupKey: typeof row.group_key === "string" ? row.group_key : "",
+        groupMatchMode: row.group_match_mode === "all"
+          ? "all"
+          : row.group_match_mode === "any"
+            ? "any"
+            : row.match_mode === "all" ? "all" : "any",
         rewardMultiplier: Number.isSafeInteger(row.reward_multiplier) ? Number(row.reward_multiplier) : 1,
         definition: definition as SolanaRoleRule
       };
@@ -216,6 +226,12 @@ function parseStoredRule(row: RoleRuleRow): RoleRuleRecord | null {
         roleId: row.role_id,
         chainId: row.chain,
         matchMode: row.match_mode === "all" ? "all" : "any",
+        groupKey: typeof row.group_key === "string" ? row.group_key : "",
+        groupMatchMode: row.group_match_mode === "all"
+          ? "all"
+          : row.group_match_mode === "any"
+            ? "any"
+            : row.match_mode === "all" ? "all" : "any",
         rewardMultiplier: Number.isSafeInteger(row.reward_multiplier) ? Number(row.reward_multiplier) : 1,
         definition: definition as SolanaRoleRule
       };
@@ -271,6 +287,12 @@ function parseStoredRule(row: RoleRuleRow): RoleRuleRecord | null {
       roleId: row.role_id,
       chainId: row.chain,
       matchMode: row.match_mode === "all" ? "all" : "any",
+      groupKey: typeof row.group_key === "string" ? row.group_key : "",
+      groupMatchMode: row.group_match_mode === "all"
+        ? "all"
+        : row.group_match_mode === "any"
+          ? "any"
+          : row.match_mode === "all" ? "all" : "any",
       rewardMultiplier: Number.isSafeInteger(row.reward_multiplier) ? Number(row.reward_multiplier) : 1,
       definition: definition as EvmRoleRule
     };
@@ -307,6 +329,8 @@ export async function addRoleRule(
     tokenId?: unknown;
     matchMode?: unknown;
     rewardMultiplier?: unknown;
+    groupKey?: unknown;
+    groupMatchMode?: unknown;
   }
 ): Promise<RoleRuleRecord> {
   const guildId = requireSnowflake(input.guildId, "Server");
@@ -337,6 +361,29 @@ export async function addRoleRule(
     : Number(input.rewardMultiplier);
   if (!Number.isSafeInteger(rewardMultiplier) || rewardMultiplier < 1 || rewardMultiplier > 100) {
     throw new RuleError("Reward multiplier must be a whole number between 1 and 100.");
+  }
+
+  let groupKey = "";
+  if (input.groupKey !== undefined && input.groupKey !== null && input.groupKey !== "") {
+    if (typeof input.groupKey !== "string" || input.groupKey.trim().length > 30) {
+      throw new RuleError("Requirement group names must be at most 30 characters.");
+    }
+    groupKey = input.groupKey.trim();
+  }
+  const existingGroupSettings = await env.DB.prepare(
+    "SELECT group_match_mode FROM role_rules WHERE guild_id = ? AND role_id = ? AND group_key = ? AND enabled = 1 LIMIT 1"
+  )
+    .bind(guildId, roleId, groupKey)
+    .first<{ group_match_mode: string }>();
+  const groupMatchMode = input.groupMatchMode === undefined || input.groupMatchMode === null || input.groupMatchMode === ""
+    ? existingGroupSettings?.group_match_mode === "all"
+      ? "all"
+      : existingGroupSettings
+        ? "any"
+        : matchMode
+    : input.groupMatchMode;
+  if (groupMatchMode !== "any" && groupMatchMode !== "all") {
+    throw new RuleError("Choose whether any or all requirements are needed for this group.");
   }
 
   let definition: RoleRuleDefinition;
@@ -436,18 +483,21 @@ export async function addRoleRule(
       "UPDATE role_rules SET match_mode = ?, reward_multiplier = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND role_id = ? AND enabled = 1"
     ).bind(matchMode, rewardMultiplier, guildId, roleId),
     env.DB.prepare(
+      "UPDATE role_rules SET group_match_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND role_id = ? AND group_key = ? AND enabled = 1"
+    ).bind(groupMatchMode, guildId, roleId, groupKey),
+    env.DB.prepare(
       `INSERT INTO role_rules
-        (id, guild_id, role_id, chain, match_mode, reward_multiplier, rule)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, guildId, roleId, chain.id, matchMode, rewardMultiplier, JSON.stringify(definition))
+        (id, guild_id, role_id, chain, match_mode, group_key, group_match_mode, reward_multiplier, rule)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, guildId, roleId, chain.id, matchMode, groupKey, groupMatchMode, rewardMultiplier, JSON.stringify(definition))
   ]);
 
-  return { id, guildId, roleId, chainId: chain.id, matchMode, rewardMultiplier, definition };
+  return { id, guildId, roleId, chainId: chain.id, matchMode, groupKey, groupMatchMode, rewardMultiplier, definition };
 }
 
 export async function listRoleRules(env: Env, guildId: string): Promise<RoleRuleRecord[]> {
   const rows = await env.DB.prepare(
-    `SELECT id, guild_id, role_id, chain, match_mode, reward_multiplier, rule
+    `SELECT id, guild_id, role_id, chain, match_mode, group_key, group_match_mode, reward_multiplier, rule
      FROM role_rules WHERE guild_id = ? AND enabled = 1 ORDER BY created_at`
   )
     .bind(guildId)
@@ -498,8 +548,33 @@ export async function updateRoleMatchMode(
   return matchModeInput;
 }
 
-export async function updateRoleRewardMultiplier(
+export async function updateGroupMatchMode(
   env: Env,
+  guildIdInput: unknown,
+  roleIdInput: unknown,
+  groupKeyInput: unknown,
+  matchModeInput: unknown
+): Promise<{ groupKey: string; matchMode: RuleMatchMode }> {
+  const guildId = requireSnowflake(guildIdInput, "Server");
+  const roleId = requireSnowflake(roleIdInput, "Role");
+  if (matchModeInput !== "any" && matchModeInput !== "all") {
+    throw new RuleError("Choose whether any or all requirements are needed for this group.");
+  }
+  const groupKey = typeof groupKeyInput === "string" ? groupKeyInput.trim().slice(0, 30) : "";
+  const result = await env.DB.prepare(
+    `UPDATE role_rules
+     SET group_match_mode = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE guild_id = ? AND role_id = ? AND group_key = ? AND enabled = 1`
+  )
+    .bind(matchModeInput, guildId, roleId, groupKey)
+    .run();
+  if ((result.meta.changes ?? 0) === 0) {
+    throw new RuleError("That group has no active holder requirements.", 404);
+  }
+  return { groupKey, matchMode: matchModeInput };
+}
+
+export async function updateRoleRewardMultiplier(  env: Env,
   guildIdInput: unknown,
   roleIdInput: unknown,
   multiplierInput: unknown
@@ -859,6 +934,20 @@ export function decideRoleAction(
   return "unchanged";
 }
 
+function collapseGroupOutcomes(
+  outcomes: Array<{ qualifies?: boolean; error?: string }>,
+  matchMode: RuleMatchMode
+): { qualifies?: boolean; error?: string } {
+  const hasError = outcomes.some((outcome) => outcome.error);
+  const hasFalse = outcomes.some((outcome) => outcome.qualifies === false);
+  const qualifies = matchMode === "all"
+    ? outcomes.length > 0 && outcomes.every((outcome) => outcome.qualifies === true)
+    : outcomes.some((outcome) => outcome.qualifies === true);
+  const unresolved = matchMode === "all" ? hasError && !hasFalse : hasError && !qualifies;
+  if (unresolved) return { error: "A requirement group could not be fully evaluated." };
+  return { qualifies };
+}
+
 export async function syncMemberRoles(
   env: Env,
   guildId: string,
@@ -942,10 +1031,19 @@ export async function syncMemberRoles(
   for (const [roleId, group] of byRole) {
     const hasRole = currentRoles.has(roleId);
     const matchMode = group[0]?.rule.matchMode ?? "any";
-    const decision = decideRoleAction(group, hasRole, matchMode);
+    const byGroup = new Map<string, RuleOutcome[]>();
+    for (const outcome of group) {
+      const bucket = byGroup.get(outcome.rule.groupKey) ?? [];
+      bucket.push(outcome);
+      byGroup.set(outcome.rule.groupKey, bucket);
+    }
+    const groupResults = [...byGroup.values()].map((outcomesInGroup) =>
+      collapseGroupOutcomes(outcomesInGroup, outcomesInGroup[0]?.rule.groupMatchMode ?? "any")
+    );
+    const decision = decideRoleAction(groupResults, hasRole, matchMode);
     const qualifies = matchMode === "all"
-      ? group.length > 0 && group.every((outcome) => outcome.qualifies === true)
-      : group.some((outcome) => outcome.qualifies === true);
+      ? groupResults.length > 0 && groupResults.every((outcome) => outcome.qualifies === true)
+      : groupResults.some((outcome) => outcome.qualifies === true);
     if (qualifies) {
       summary.qualified.push(roleId);
     }
@@ -971,7 +1069,9 @@ export async function syncMemberRoles(
           discordUserId,
           roleId,
           action,
-          `Evaluated ${group.length} enabled ${matchMode.toUpperCase()} requirement(s).`
+          byGroup.size > 1
+            ? `Evaluated ${group.length} enabled ${matchMode.toUpperCase()} requirement(s) across ${byGroup.size} groups.`
+            : `Evaluated ${group.length} enabled ${matchMode.toUpperCase()} requirement(s).`
         )
         .run();
     } catch (error) {

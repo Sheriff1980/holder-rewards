@@ -1163,7 +1163,7 @@ export async function handleDiscordInteraction(
             : rule.definition.type === "solana-collection"
               ? rule.definition.collectionAddress
               : rule.definition.contractAddress;
-          return `- [${rule.matchMode.toUpperCase()}] ${rule.id}: <@&${rule.roleId}> for ${minimum} on ${rule.chainId} at ${assetAddress}`;
+          return `- [${rule.matchMode.toUpperCase()}] ${rule.id}: <@&${rule.roleId}> for ${minimum} on ${rule.chainId} at ${assetAddress}${rule.groupKey ? ` (group "${rule.groupKey}", ${rule.groupMatchMode})` : ""}`;
         });
         return ephemeralMessage(`Enabled holder rules:\n${lines.join("\n")}`.slice(0, 1_990));
       }

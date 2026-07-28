@@ -452,6 +452,18 @@ export function managerPage(env: Env): string {
                 <input id="reward-multiplier" type="number" min="1" max="100" step="1" value="1" required>
               </div>
               <div>
+                <label for="group-key">Requirement group</label>
+                <input id="group-key" list="group-keys" maxlength="30" placeholder="Main">
+                <datalist id="group-keys"></datalist>
+              </div>
+              <div>
+                <label for="group-match-mode">Group requires</label>
+                <select id="group-match-mode">
+                  <option value="any">Any requirement</option>
+                  <option value="all">All requirements</option>
+                </select>
+              </div>
+              <div>
                 <label id="asset-address-label" for="contract-address">Contract address</label>
                 <input id="contract-address" inputmode="text" autocomplete="off" placeholder="0x..." required>
               </div>
@@ -671,6 +683,8 @@ export function managerPage(env: Env): string {
       const typeInput = document.getElementById("rule-type");
       const roleInput = document.getElementById("role-id");
       const matchModeInput = document.getElementById("match-mode");
+      const groupKeyInput = document.getElementById("group-key");
+      const groupMatchModeInput = document.getElementById("group-match-mode");
       const chainInput = document.getElementById("chain-id");
       const tokenFields = document.getElementById("token-id-fields");
       const traitFields = document.getElementById("trait-fields");
@@ -823,7 +837,32 @@ export function managerPage(env: Env): string {
         document.getElementById("reward-multiplier").value = existing
           ? String(existing.rewardMultiplier || 1)
           : "1";
+        syncGroupOptions();
       }
+
+      function syncGroupOptions() {
+        const datalist = document.getElementById("group-keys");
+        datalist.replaceChildren();
+        const keys = [...new Set((data.rules || [])
+          .filter((rule) => rule.roleId === roleInput.value && rule.groupKey)
+          .map((rule) => rule.groupKey))];
+        for (const key of keys) {
+          const option = document.createElement("option");
+          option.value = key;
+          datalist.append(option);
+        }
+        syncGroupMode();
+      }
+
+      function syncGroupMode() {
+        const key = groupKeyInput.value.trim();
+        const existing = (data.rules || []).find(
+          (rule) => rule.roleId === roleInput.value && (rule.groupKey || "") === key
+        );
+        groupMatchModeInput.value = existing ? existing.groupMatchMode : matchModeInput.value;
+      }
+
+      groupKeyInput.addEventListener("change", syncGroupMode);
 
       function renderOperations() {
         const operations = data.operations;
@@ -934,22 +973,54 @@ export function managerPage(env: Env): string {
           multiplierField.append(multiplierLabel, multiplier);
           header.append(title, modeField, multiplierField);
           group.append(header);
+          const byGroup = new Map();
           for (const rule of rules) {
-          const row = document.createElement("div");
-          row.className = "rule-row";
-          const copy = document.createElement("div");
-          const description = document.createElement("span");
-          description.textContent = ruleSummary(rule) + " on " + (chains.get(rule.chainId) || rule.chainId);
-          const address = document.createElement("span");
-          address.className = "muted";
-          address.textContent = rule.definition.contractAddress || rule.definition.mintAddress || rule.definition.collectionAddress;
-          copy.append(description, address);
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.dataset.ruleId = rule.id;
-          remove.textContent = "Remove";
-          row.append(copy, remove);
-          group.append(row);
+            const key = rule.groupKey || "";
+            const bucket = byGroup.get(key) || [];
+            bucket.push(rule);
+            byGroup.set(key, bucket);
+          }
+          for (const [groupKey, groupRules] of byGroup) {
+            const groupHeader = document.createElement("div");
+            groupHeader.className = "rule-group-header";
+            const groupTitle = document.createElement("span");
+            groupTitle.className = "muted";
+            groupTitle.textContent = "Group: " + (groupKey || "Main");
+            const groupModeField = document.createElement("div");
+            const groupModeLabel = document.createElement("label");
+            groupModeLabel.textContent = "Group requires";
+            const groupMode = document.createElement("select");
+            groupMode.dataset.groupMode = groupKey;
+            groupMode.dataset.roleId = roleId;
+            groupModeLabel.htmlFor = "group-mode-" + roleId + "-" + (groupKey || "main");
+            groupMode.id = groupModeLabel.htmlFor;
+            for (const optionData of [{ value: "any", label: "Any requirement" }, { value: "all", label: "All requirements" }]) {
+              const option = document.createElement("option");
+              option.value = optionData.value;
+              option.textContent = optionData.label;
+              groupMode.append(option);
+            }
+            groupMode.value = groupRules[0].groupMatchMode || "any";
+            groupModeField.append(groupModeLabel, groupMode);
+            groupHeader.append(groupTitle, groupModeField);
+            group.append(groupHeader);
+            for (const rule of groupRules) {
+            const row = document.createElement("div");
+            row.className = "rule-row";
+            const copy = document.createElement("div");
+            const description = document.createElement("span");
+            description.textContent = ruleSummary(rule) + " on " + (chains.get(rule.chainId) || rule.chainId);
+            const address = document.createElement("span");
+            address.className = "muted";
+            address.textContent = rule.definition.contractAddress || rule.definition.mintAddress || rule.definition.collectionAddress;
+            copy.append(description, address);
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.dataset.ruleId = rule.id;
+            remove.textContent = "Remove";
+            row.append(copy, remove);
+            group.append(row);
+            }
           }
           list.append(group);
         }
@@ -1298,11 +1369,16 @@ export function managerPage(env: Env): string {
             traitName: value("trait-name"),
             traitValue: value("trait-value"),
             matchMode: matchModeInput.value,
-            rewardMultiplier: value("reward-multiplier")
+            rewardMultiplier: value("reward-multiplier"),
+            groupKey: groupKeyInput.value.trim() || undefined,
+            groupMatchMode: groupMatchModeInput.value
           };
           const saved = await api("rules", { method: "POST", body: JSON.stringify(payload) });
           for (const existing of data.rules) {
             if (existing.roleId === saved.rule.roleId) existing.matchMode = saved.rule.matchMode;
+            if (existing.roleId === saved.rule.roleId && (existing.groupKey || "") === (saved.rule.groupKey || "")) {
+              existing.groupMatchMode = saved.rule.groupMatchMode;
+            }
           }
           data.rules.push(saved.rule);
           renderRules();
@@ -1359,6 +1435,36 @@ export function managerPage(env: Env): string {
             renderRules();
           } finally {
             multiplier.disabled = false;
+          }
+          return;
+        }
+        const groupSelect = event.target.closest("select[data-group-mode]");
+        if (groupSelect) {
+          groupSelect.disabled = true;
+          result.className = "";
+          result.textContent = "Saving group requirements...";
+          try {
+            const saved = await api("group-mode", {
+              method: "PUT",
+              body: JSON.stringify({
+                roleId: groupSelect.dataset.roleId,
+                groupKey: groupSelect.dataset.groupMode,
+                matchMode: groupSelect.value
+              })
+            });
+            for (const rule of data.rules) {
+              if (rule.roleId === saved.roleId && (rule.groupKey || "") === saved.groupKey) {
+                rule.groupMatchMode = saved.matchMode;
+              }
+            }
+            result.className = "success";
+            result.textContent = "Group requirements updated.";
+          } catch (error) {
+            result.className = "error";
+            result.textContent = error instanceof Error ? error.message : "Group requirements could not be updated.";
+            renderRules();
+          } finally {
+            groupSelect.disabled = false;
           }
           return;
         }

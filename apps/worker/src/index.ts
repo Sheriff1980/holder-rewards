@@ -43,6 +43,7 @@ import {
   removeRoleRule,
   RuleError,
   syncMemberRoles,
+  updateGroupMatchMode,
   updateRoleMatchMode,
   updateRoleRewardMultiplier
 } from "./rules.js";
@@ -523,7 +524,9 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         traitValue: input.traitValue,
         tokenId: input.tokenId,
         matchMode: input.matchMode,
-        rewardMultiplier: input.rewardMultiplier
+        rewardMultiplier: input.rewardMultiplier,
+        groupKey: input.groupKey,
+        groupMatchMode: input.groupMatchMode
       });
       await recordAuditEvent(env, {
         guildId: session.guild_id,
@@ -555,8 +558,23 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
       return jsonResponse({ ok: true, roleId: input.roleId, matchMode });
     }
 
-    if (request.method === "PUT" && path === "role-multiplier") {
+    if (request.method === "PUT" && path === "group-mode") {
       const input = (await request.json()) as Record<string, unknown>;
+      const roles = await listManageableDiscordRoles(env, session.guild_id);
+      if (!roles.some((role) => role.id === input.roleId)) {
+        return jsonResponse({ error: "Choose a role below the bot's role in Discord." }, 400);
+      }
+      const saved = await updateGroupMatchMode(env, session.guild_id, input.roleId, input.groupKey, input.matchMode);
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "rule_updated",
+        detail: `${saved.matchMode.toUpperCase()} requirements for group "${saved.groupKey || "Main"}" on role ...${String(input.roleId).slice(-6)}`
+      });
+      return jsonResponse({ ok: true, roleId: input.roleId, groupKey: saved.groupKey, matchMode: saved.matchMode });
+    }
+
+    if (request.method === "PUT" && path === "role-multiplier") {      const input = (await request.json()) as Record<string, unknown>;
       const roles = await listManageableDiscordRoles(env, session.guild_id);
       if (!roles.some((role) => role.id === input.roleId)) {
         return jsonResponse({ error: "Choose a role below the bot's role in Discord." }, 400);
