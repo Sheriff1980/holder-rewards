@@ -2,12 +2,13 @@ import { getPointsBalance } from "./points.js";
 import { getDiscordMemberRoles } from "./rules.js";
 import type { Env } from "./types.js";
 
-export type QuestKind = "link_wallet" | "hold_role" | "daily_claims" | "code";
+export type QuestKind = "link_wallet" | "hold_role" | "daily_claims" | "code" | "custom";
 
 export type QuestConfig = {
   roleId?: string;
   days?: number;
   codeHash?: string;
+  instructions?: string;
 };
 
 export type Quest = {
@@ -19,13 +20,13 @@ export type Quest = {
   reward: number;
 };
 
-export type QuestWithStatus = Quest & { completed: boolean };
+export type QuestWithStatus = Quest & { completed: boolean; pendingSubmission: boolean };
 
 export type QuestCheckResult = "completed" | "already_completed" | "not_met";
 
 export class QuestError extends Error {}
 
-const QUEST_KINDS = new Set<QuestKind>(["link_wallet", "hold_role", "daily_claims", "code"]);
+const QUEST_KINDS = new Set<QuestKind>(["link_wallet", "hold_role", "daily_claims", "code", "custom"]);
 
 type QuestRow = {
   id: string;
@@ -46,7 +47,8 @@ function parseQuest(row: QuestRow): Quest | null {
     config = {
       roleId: typeof parsed.roleId === "string" ? parsed.roleId : undefined,
       days: Number.isSafeInteger(parsed.days) ? Number(parsed.days) : undefined,
-      codeHash: typeof parsed.codeHash === "string" ? parsed.codeHash : undefined
+      codeHash: typeof parsed.codeHash === "string" ? parsed.codeHash : undefined,
+      instructions: typeof parsed.instructions === "string" ? parsed.instructions : undefined
     };
   } catch {
     return null;
@@ -54,6 +56,7 @@ function parseQuest(row: QuestRow): Quest | null {
   if (row.kind === "hold_role" && !config.roleId) return null;
   if (row.kind === "daily_claims" && !config.days) return null;
   if (row.kind === "code" && !config.codeHash) return null;
+  if (row.kind === "custom" && !config.instructions) return null;
   return { id: row.id, guildId: row.guild_id, title: row.title, kind: row.kind as QuestKind, config, reward: row.reward };
 }
 
@@ -84,16 +87,26 @@ export async function listQuestsWithStatus(
   guildId: string,
   discordUserId: string
 ): Promise<QuestWithStatus[]> {
-  const [quests, completions] = await Promise.all([
+  const [quests, completions, submissions] = await Promise.all([
     listQuests(env, guildId),
     env.DB.prepare(
       "SELECT quest_id FROM quest_completions WHERE guild_id = ? AND discord_user_id = ?"
     )
       .bind(guildId, discordUserId)
+      .all<{ quest_id: string }>(),
+    env.DB.prepare(
+      "SELECT quest_id FROM quest_submissions WHERE guild_id = ? AND discord_user_id = ? AND status = 'pending'"
+    )
+      .bind(guildId, discordUserId)
       .all<{ quest_id: string }>()
   ]);
   const completed = new Set(completions.results.map((row) => row.quest_id));
-  return quests.map((quest) => ({ ...quest, completed: completed.has(quest.id) }));
+  const pending = new Set(submissions.results.map((row) => row.quest_id));
+  return quests.map((quest) => ({
+    ...quest,
+    completed: completed.has(quest.id),
+    pendingSubmission: pending.has(quest.id)
+  }));
 }
 
 export async function createQuest(
@@ -106,6 +119,7 @@ export async function createQuest(
     roleId?: unknown;
     days?: unknown;
     code?: unknown;
+    instructions?: unknown;
   }
 ): Promise<Quest> {
   const guildId = requireSnowflake(input.guildId, "Server");
@@ -138,6 +152,16 @@ export async function createQuest(
       throw new QuestError("The secret code must be between 4 and 100 characters.");
     }
     config.codeHash = await hashQuestCode(input.code);
+  }
+  if (kind === "custom") {
+    if (
+      typeof input.instructions !== "string" ||
+      input.instructions.trim().length < 2 ||
+      input.instructions.trim().length > 300
+    ) {
+      throw new QuestError("Quest instructions must be between 2 and 300 characters.");
+    }
+    config.instructions = input.instructions.trim();
   }
 
   const quest: Quest = { id: crypto.randomUUID(), guildId, title, kind, config, reward };
@@ -251,4 +275,107 @@ export async function submitQuestCode(
   }
   const result = await completeQuest(env, quest, discordUserId);
   return { result, quest, balance: await getPointsBalance(env, guildId, discordUserId) };
+}
+
+export type QuestSubmission = {
+  id: string;
+  questId: string;
+  questTitle: string;
+  reward: number;
+  discordUserId: string;
+  proof: string;
+  createdAt: string;
+};
+
+export async function submitQuestProof(
+  env: Env,
+  guildId: string,
+  questId: string,
+  discordUserId: string,
+  proof: unknown
+): Promise<{ quest: Quest }> {
+  if (typeof proof !== "string" || proof.trim().length < 2 || proof.trim().length > 400) {
+    throw new QuestError("Proof must be between 2 and 400 characters.");
+  }
+  const quest = (await listQuests(env, guildId)).find((candidate) => candidate.id === questId);
+  if (!quest || quest.kind !== "custom") {
+    throw new QuestError("That quest is no longer available.");
+  }
+  const completed = await env.DB.prepare(
+    "SELECT quest_id FROM quest_completions WHERE quest_id = ? AND discord_user_id = ?"
+  )
+    .bind(quest.id, discordUserId)
+    .first<{ quest_id: string }>();
+  if (completed) {
+    throw new QuestError(`You already completed ${quest.title}.`);
+  }
+  await env.DB.prepare(
+    `INSERT INTO quest_submissions (id, quest_id, guild_id, discord_user_id, proof)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(quest_id, discord_user_id) DO UPDATE SET
+       proof = excluded.proof,
+       status = 'pending',
+       reviewed_by = NULL,
+       reviewed_at = NULL,
+       created_at = CURRENT_TIMESTAMP`
+  )
+    .bind(crypto.randomUUID(), quest.id, guildId, discordUserId, proof.trim())
+    .run();
+  return { quest };
+}
+
+export async function listPendingSubmissions(env: Env, guildId: string): Promise<QuestSubmission[]> {
+  const rows = await env.DB.prepare(
+    `SELECT quest_submissions.id, quest_submissions.quest_id, quest_submissions.discord_user_id,
+       quest_submissions.proof, quest_submissions.created_at,
+       quests.title AS quest_title, quests.reward AS reward
+     FROM quest_submissions
+     JOIN quests ON quests.id = quest_submissions.quest_id
+     WHERE quest_submissions.guild_id = ? AND quest_submissions.status = 'pending'
+     ORDER BY quest_submissions.created_at`
+  )
+    .bind(guildId)
+    .all<{
+      id: string;
+      quest_id: string;
+      discord_user_id: string;
+      proof: string;
+      created_at: string;
+      quest_title: string;
+      reward: number;
+    }>();
+  return rows.results.map((row) => ({
+    id: row.id,
+    questId: row.quest_id,
+    questTitle: row.quest_title,
+    reward: row.reward,
+    discordUserId: row.discord_user_id,
+    proof: row.proof,
+    createdAt: row.created_at
+  }));
+}
+
+export async function reviewQuestSubmission(
+  env: Env,
+  input: { guildId: string; submissionId: string; reviewerId: string; approve: boolean }
+): Promise<{ submission: QuestSubmission; result: "approved" | "rejected" }> {
+  const pending = await listPendingSubmissions(env, input.guildId);
+  const submission = pending.find((candidate) => candidate.id === input.submissionId);
+  if (!submission) {
+    throw new QuestError("That submission was already reviewed or no longer exists.");
+  }
+  if (input.approve) {
+    const quest = (await listQuests(env, input.guildId)).find(
+      (candidate) => candidate.id === submission.questId
+    );
+    if (quest) await completeQuest(env, quest, submission.discordUserId);
+  }
+  await env.DB.prepare(
+    `UPDATE quest_submissions
+     SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status = 'pending'`
+  )
+    .bind(input.approve ? "approved" : "rejected", input.reviewerId, submission.id)
+    .run();
+  return { submission, result: input.approve ? "approved" : "rejected" };
 }

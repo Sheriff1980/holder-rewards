@@ -28,6 +28,7 @@ Managers create quests in the browser manager; members see them with `/quests li
 - **Hold a role** completes when the member currently has a manager-chosen Discord role.
 - **Collect daily rewards** completes after the configured number of distinct daily-claim days.
 - **Secret code** completes when the member submits the manager's code (stored only as a SHA-256 hash, matched case-insensitively).
+- **Custom** quests carry manager instructions for anything ("retweet and comment on this post", join an event, create fan art). Members paste proof in a Discord popup; the manager approves or rejects it in the browser manager. Approval pays automatically, rejection lets the member submit again.
 
 Quests that depend on what members say or react to in Discord are intentionally absent: this bot receives interactions only and cannot read message content.
 

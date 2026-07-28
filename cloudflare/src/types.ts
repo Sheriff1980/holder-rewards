@@ -41,5 +41,13 @@ export type DiscordInteraction = {
         value?: string | number | boolean;
       }>;
     }>;
+    components?: Array<{
+      type: number;
+      components?: Array<{
+        custom_id?: string;
+        type?: number;
+        value?: string;
+      }>;
+    }>;
   };
 };

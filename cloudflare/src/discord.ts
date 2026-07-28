@@ -22,7 +22,7 @@ import {
 } from "./points.js";
 import { brandLogoUrl, currencyIconUrl, hasBrandLogo, hasCurrencyIcon } from "./assets.js";
 import { accentColorNumber, getGuildBranding } from "./branding.js";
-import { checkQuest, listQuestsWithStatus, QuestError, submitQuestCode } from "./quests.js";
+import { checkQuest, listQuests, listQuestsWithStatus, QuestError, submitQuestCode, submitQuestProof } from "./quests.js";
 import { enterRaffle, listRaffleEntriesForMember, listRaffles, RaffleError } from "./raffles.js";
 import { listStoreItems, purchaseStoreItem, StoreError } from "./store.js";
 
@@ -577,6 +577,63 @@ export async function handleDiscordInteraction(
     }
   }
 
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("quest:proof:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Quests are available inside a Discord server.");
+    }
+    const questId = interaction.data.custom_id.slice("quest:proof:".length);
+    const quest = (await listQuests(env, interaction.guild_id)).find(
+      (candidate) => candidate.id === questId && candidate.kind === "custom"
+    );
+    if (!quest) {
+      return ephemeralMessage("That quest is no longer available.");
+    }
+    return Response.json({
+      type: 9,
+      data: {
+        custom_id: `quest:proof:${quest.id}`,
+        title: quest.title.slice(0, 45),
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 4,
+                custom_id: "proof",
+                label: "Your proof (link or description)",
+                style: 2,
+                required: true,
+                max_length: 400,
+                placeholder: (quest.config.instructions ?? "Paste your proof here.").slice(0, 100)
+              }
+            ]
+          }
+        ]
+      }
+    });
+  }
+
+  if (interaction.type === 5 && interaction.data?.custom_id?.startsWith("quest:proof:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Quests are available inside a Discord server.");
+    }
+    const questId = interaction.data.custom_id.slice("quest:proof:".length);
+    const proof = interaction.data.components?.[0]?.components?.[0]?.value;
+    try {
+      const { quest } = await submitQuestProof(env, interaction.guild_id, questId, discordUserId, proof);
+      return ephemeralMessage(
+        `Proof received for ${quest.title}. A manager will review it and the reward lands automatically when approved.`
+      );
+    } catch (error) {
+      if (error instanceof QuestError) {
+        return ephemeralMessage(error.message);
+      }
+      return ephemeralMessage("Your proof could not be submitted right now. Please try again shortly.");
+    }
+  }
+
   if (interaction.type !== 2 || !interaction.data?.name) {
     return new Response("Unsupported interaction", { status: 400 });
   }
@@ -842,24 +899,32 @@ export async function handleDiscordInteraction(
             ? "Hold the required role"
             : quest.kind === "daily_claims"
               ? `Collect daily rewards on ${quest.config.days} different days`
-              : "Submit the secret code with /quests code";
-        return `[${quest.completed ? "x" : " "}] ${quest.title} - ${detail} - ${quest.reward.toLocaleString()} ${settings.currencyName}`;
+              : quest.kind === "custom"
+                ? quest.config.instructions
+                : "Submit the secret code with /quests code";
+        const marker = quest.completed ? "x" : quest.pendingSubmission ? "~" : " ";
+        return `[${marker}] ${quest.title} - ${detail} - ${quest.reward.toLocaleString()} ${settings.currencyName}`;
       });
-      const checkable = quests.filter((quest) => !quest.completed && quest.kind !== "code").slice(0, 5);
+      const buttons = quests
+        .filter((quest) =>
+          !quest.completed &&
+          (quest.kind === "custom" ? !quest.pendingSubmission : quest.kind !== "code")
+        )
+        .slice(0, 5);
       return Response.json({
         type: 4,
         data: {
           content: lines.join("\n").slice(0, 1_900),
           flags: EPHEMERAL,
           allowed_mentions: { parse: [] },
-          components: checkable.length > 0
+          components: buttons.length > 0
             ? [{
                 type: 1,
-                components: checkable.map((quest) => ({
+                components: buttons.map((quest) => ({
                   type: 2,
                   style: 1,
-                  label: `Check: ${quest.title.slice(0, 60)}`,
-                  custom_id: `quest:check:${quest.id}`
+                  label: `${quest.kind === "custom" ? "Submit" : "Check"}: ${quest.title.slice(0, 60)}`,
+                  custom_id: quest.kind === "custom" ? `quest:proof:${quest.id}` : `quest:check:${quest.id}`
                 }))
               }]
             : []

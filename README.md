@@ -36,7 +36,7 @@ The hosted foundation is working. It currently provides:
 - Per-role Any/All requirement groups that can combine NFTs, traits, fungible tokens, and different chains.
 - Private linked-wallet management with account-scoped unlinking and immediate role refresh.
 - An append-only, per-server points ledger with browser-managed naming and currency images, daily claims, manager grants, balances, and a leaderboard.
-- Member tipping with a manager-controlled daily cap, and quests that pay once per member for linking a wallet, holding a role, collecting daily rewards, or submitting a secret code.
+- Member tipping with a manager-controlled daily cap, and quests that pay once per member for linking a wallet, holding a role, collecting daily rewards, submitting a secret code, or completing manager-reviewed custom proof quests.
 - Point-priced raffles with weighted draws, automatic prize roles, and full refunds on cancellation, plus a points store with stock limits, automatic role grants, and safe rollback when Discord rejects a grant.
 - Per-server community branding with a display name, logo, and accessible accent color.
 - A manager overview for verified members, wallets, rules, rewards activity, scheduled checks, sync problems, and automatic blockchain-provider health checks with one-click retry.

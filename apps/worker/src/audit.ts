@@ -18,6 +18,8 @@ export type AuditAction =
   | "indexer_config_removed"
   | "quest_created"
   | "quest_removed"
+  | "quest_submission_approved"
+  | "quest_submission_rejected"
   | "raffle_created"
   | "raffle_drawn"
   | "raffle_cancelled"

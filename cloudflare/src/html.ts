@@ -497,6 +497,7 @@ export function managerPage(env: Env): string {
                   <option value="hold_role">Hold a role</option>
                   <option value="daily_claims">Collect daily rewards</option>
                   <option value="code">Secret code</option>
+                  <option value="custom">Custom (manager reviews proof)</option>
                 </select>
               </div>
               <div>
@@ -516,10 +517,18 @@ export function managerPage(env: Env): string {
               <label for="quest-code">Secret code</label>
               <input id="quest-code" maxlength="100" placeholder="Members submit this in Discord">
             </div>
+            <div id="quest-instructions-field" hidden>
+              <label for="quest-instructions">Instructions</label>
+              <input id="quest-instructions" maxlength="300" placeholder="Retweet and comment on this post: https://...">
+            </div>
             <div class="form-actions"><button id="save-quest" type="submit">Add quest</button></div>
           </form>
           <div id="quest-result" aria-live="polite"></div>
           <div id="quest-list" class="rule-list"></div>
+          <div id="submission-area" hidden>
+            <h2>Pending quest proofs</h2>
+            <div id="submission-list" class="rule-list"></div>
+          </div>
         </section>
         <section class="panel">
           <h2>Raffles</h2>
@@ -689,6 +698,8 @@ export function managerPage(env: Env): string {
       const saveQuest = document.getElementById("save-quest");
       const questResult = document.getElementById("quest-result");
       const questList = document.getElementById("quest-list");
+      const submissionArea = document.getElementById("submission-area");
+      const submissionList = document.getElementById("submission-list");
       const raffleForm = document.getElementById("raffle-form");
       const rafflePrizeRole = document.getElementById("raffle-prize-role");
       const saveRaffle = document.getElementById("save-raffle");
@@ -1381,9 +1392,11 @@ export function managerPage(env: Env): string {
         document.getElementById("quest-role-field").hidden = kind !== "hold_role";
         document.getElementById("quest-days-field").hidden = kind !== "daily_claims";
         document.getElementById("quest-code-field").hidden = kind !== "code";
+        document.getElementById("quest-instructions-field").hidden = kind !== "custom";
         questRole.required = kind === "hold_role";
         document.getElementById("quest-days").required = kind === "daily_claims";
         document.getElementById("quest-code").required = kind === "code";
+        document.getElementById("quest-instructions").required = kind === "custom";
       }
 
       function questSummary(quest) {
@@ -1393,6 +1406,7 @@ export function managerPage(env: Env): string {
           return "Hold role " + (role ? role.name : quest.config.roleId);
         }
         if (quest.kind === "daily_claims") return "Claim daily rewards on " + quest.config.days + " days";
+        if (quest.kind === "custom") return "Custom: " + quest.config.instructions;
         return "Secret code";
       }
 
@@ -1439,6 +1453,7 @@ export function managerPage(env: Env): string {
           if (questKind.value === "hold_role") body.roleId = questRole.value;
           if (questKind.value === "daily_claims") body.days = document.getElementById("quest-days").value;
           if (questKind.value === "code") body.code = document.getElementById("quest-code").value;
+          if (questKind.value === "custom") body.instructions = document.getElementById("quest-instructions").value.trim();
           const saved = await api("quests", { method: "POST", body: JSON.stringify(body) });
           data.quests = (data.quests || []).concat(saved.quest);
           renderQuests();
@@ -1465,6 +1480,58 @@ export function managerPage(env: Env): string {
         } catch (error) {
           questResult.className = "error";
           questResult.textContent = error instanceof Error ? error.message : "Quest could not be removed.";
+          button.disabled = false;
+        }
+      });
+
+      function renderSubmissions() {
+        const submissions = data.pendingSubmissions || [];
+        submissionArea.hidden = submissions.length === 0;
+        submissionList.replaceChildren();
+        for (const submission of submissions) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const description = document.createElement("span");
+          description.textContent = submission.questTitle + " - " + submission.reward.toLocaleString() + " points - member ..." + submission.discordUserId.slice(-6);
+          const proof = document.createElement("span");
+          proof.className = "muted";
+          proof.textContent = submission.proof;
+          copy.append(description, proof);
+          const approve = document.createElement("button");
+          approve.type = "button";
+          approve.dataset.submissionApprove = submission.id;
+          approve.textContent = "Approve";
+          const reject = document.createElement("button");
+          reject.type = "button";
+          reject.dataset.submissionReject = submission.id;
+          reject.textContent = "Reject";
+          row.append(copy, approve, reject);
+          submissionList.append(row);
+        }
+      }
+
+      submissionList.addEventListener("click", async (event) => {
+        const approveButton = event.target.closest("button[data-submission-approve]");
+        const rejectButton = event.target.closest("button[data-submission-reject]");
+        const button = approveButton || rejectButton;
+        if (!button) return;
+        button.disabled = true;
+        const id = approveButton ? button.dataset.submissionApprove : button.dataset.submissionReject;
+        try {
+          await api("quest-submissions/" + encodeURIComponent(id) + (approveButton ? "/approve" : "/reject"), {
+            method: "POST",
+            body: "{}"
+          });
+          data.pendingSubmissions = (data.pendingSubmissions || []).filter(
+            (submission) => submission.id !== id
+          );
+          renderSubmissions();
+          questResult.className = "success";
+          questResult.textContent = approveButton ? "Proof approved and reward paid." : "Proof rejected; the member can submit again.";
+        } catch (error) {
+          questResult.className = "error";
+          questResult.textContent = error instanceof Error ? error.message : "The review could not be saved.";
           button.disabled = false;
         }
       });
@@ -1710,6 +1777,7 @@ export function managerPage(env: Env): string {
         renderIndexerForm();
         updateQuestFields();
         renderQuests();
+        renderSubmissions();
         setPrizeRoleOptions();
         renderRaffles();
         setStoreRoleOptions();

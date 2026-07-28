@@ -14,6 +14,7 @@ All notable changes to Holder Rewards will be documented here. The project follo
 - Quest engine: managers create wallet-link, role-hold, daily-claim-streak, and secret-code quests in the browser manager; members complete them via `/quests` with one-time payouts enforced by a completion table.
 - Point-priced raffles: `/raffle enter` buys capped entries, weighted-random draws in the manager, optional automatic prize roles, and full entry refunds on cancellation.
 - Points store: `/store buy` purchases manager-listed items with optional limited stock and automatic Discord role grants; failed role grants roll back the charge completely, and a recent-purchases feed supports manual fulfillment.
+- Custom proof quests: members paste proof (links or text) in a Discord popup, and managers approve (automatic payout) or reject from a review queue in the browser manager.
 
 ### Removed
 

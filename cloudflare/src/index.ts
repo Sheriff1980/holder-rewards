@@ -11,7 +11,7 @@ import {
   removeIndexerConfig,
   saveIndexerConfig
 } from "./indexers.js";
-import { createQuest, listQuests, QuestError, removeQuest } from "./quests.js";
+import { createQuest, listPendingSubmissions, listQuests, QuestError, removeQuest, reviewQuestSubmission } from "./quests.js";
 import {
   cancelRaffle,
   createRaffle,
@@ -284,7 +284,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, hasIcon, hasLogo] = await Promise.all([
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, hasIcon, hasLogo] = await Promise.all([
         listChains(env),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
@@ -297,6 +297,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         listRaffles(env, session.guild_id),
         listStoreItems(env, session.guild_id),
         listRecentPurchases(env, session.guild_id),
+        listPendingSubmissions(env, session.guild_id),
         hasCurrencyIcon(env, session.guild_id),
         hasBrandLogo(env, session.guild_id)
       ]);
@@ -314,6 +315,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         raffles,
         storeItems,
         recentPurchases,
+        pendingSubmissions,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
           : null,
@@ -603,7 +605,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         reward: input.reward,
         roleId: input.roleId,
         days: input.days,
-        code: input.code
+        code: input.code,
+        instructions: input.instructions
       });
       await recordAuditEvent(env, {
         guildId: session.guild_id,
@@ -626,6 +629,31 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
       return removed
         ? jsonResponse({ ok: true })
         : jsonResponse({ error: "That quest was already removed." }, 404);
+    }
+
+    if (
+      request.method === "POST" &&
+      path.startsWith("quest-submissions/") &&
+      (path.endsWith("/approve") || path.endsWith("/reject"))
+    ) {
+      const approve = path.endsWith("/approve");
+      const submissionId = path.slice(
+        "quest-submissions/".length,
+        -(approve ? "/approve" : "/reject").length
+      );
+      const { submission, result } = await reviewQuestSubmission(env, {
+        guildId: session.guild_id,
+        submissionId,
+        reviewerId: session.discord_user_id,
+        approve
+      });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: approve ? "quest_submission_approved" : "quest_submission_rejected",
+        detail: `"${submission.questTitle}" proof from member ...${submission.discordUserId.slice(-6)} ${result}`
+      });
+      return jsonResponse({ ok: true, result });
     }
 
     if (request.method === "POST" && path === "raffles") {
