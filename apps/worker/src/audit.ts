@@ -15,7 +15,14 @@ export type AuditAction =
   | "rule_removed"
   | "custom_chain_saved"
   | "indexer_config_saved"
-  | "indexer_config_removed";
+  | "indexer_config_removed"
+  | "quest_created"
+  | "quest_removed"
+  | "raffle_created"
+  | "raffle_drawn"
+  | "raffle_cancelled"
+  | "store_item_created"
+  | "store_item_removed";
 
 export async function recordAuditEvent(
   env: Env,

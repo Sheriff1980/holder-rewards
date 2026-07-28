@@ -753,7 +753,7 @@ async function evaluateSolanaRule(
   }
 }
 
-async function changeDiscordRole(
+export async function changeDiscordRole(
   env: Env,
   guildId: string,
   discordUserId: string,
@@ -818,7 +818,7 @@ async function fetchDiscordWithRetry(input: string, init: RequestInit): Promise<
   throw new Error("Discord request exhausted its retry attempts.");
 }
 
-async function getDiscordMemberRoles(
+export async function getDiscordMemberRoles(
   env: Env,
   guildId: string,
   discordUserId: string

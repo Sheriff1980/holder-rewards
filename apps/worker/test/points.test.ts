@@ -7,6 +7,8 @@ import {
   getPointsLeaderboard,
   getRewardSettings,
   grantPoints,
+  TipError,
+  tipPoints,
   updateRewardSettings
 } from "../src/points.js";
 import type { Env } from "../src/types.js";
@@ -34,16 +36,18 @@ class Statement {
         this.db.settings.set(String(this.values[0]), {
           reward_currency_name: "Points",
           daily_claim_amount: 10,
-          holder_daily_amount: 0
+          holder_daily_amount: 0,
+          tip_daily_limit: 100
         });
       }
       return { success: true, meta: { changes: 1 } } as D1Result;
     }
     if (this.sql.includes("UPDATE guild_settings")) {
-      this.db.settings.set(String(this.values[3]), {
+      this.db.settings.set(String(this.values[4]), {
         reward_currency_name: String(this.values[0]),
         daily_claim_amount: Number(this.values[1]),
-        holder_daily_amount: Number(this.values[2])
+        holder_daily_amount: Number(this.values[2]),
+        tip_daily_limit: Number(this.values[3])
       });
       return { success: true, meta: { changes: 1 } } as D1Result;
     }
@@ -80,6 +84,18 @@ class Statement {
         member_count: new Set(transactions.map((item) => item.discordUserId)).size,
         net_points: transactions.reduce((sum, item) => sum + item.amount, 0)
       } as T;
+    }
+    if (this.sql.includes("source LIKE 'tip:%'")) {
+      const tipped = this.db.transactions
+        .filter(
+          (item) =>
+            item.guildId === this.values[0] &&
+            item.discordUserId === this.values[1] &&
+            item.amount < 0 &&
+            item.source.startsWith("tip:")
+        )
+        .reduce((sum, item) => sum + -item.amount, 0);
+      return { tipped } as T;
     }
     const balance = this.db.transactions
       .filter(
@@ -123,6 +139,7 @@ class MemoryD1 {
     reward_currency_name: string;
     daily_claim_amount: number;
     holder_daily_amount: number;
+    tip_daily_limit: number;
   }>();
   multipliers = new Map<string, number>();
 
@@ -208,13 +225,15 @@ describe("points ledger", () => {
       updateRewardSettings(env, "guild-1", {
         currencyName: "Bananas",
         dailyClaimAmount: 25,
-        holderDailyAmount: 4
+        holderDailyAmount: 4,
+        tipDailyLimit: 150
       })
-    ).resolves.toEqual({ currencyName: "Bananas", dailyClaimAmount: 25, holderDailyAmount: 4 });
+    ).resolves.toEqual({ currencyName: "Bananas", dailyClaimAmount: 25, holderDailyAmount: 4, tipDailyLimit: 150 });
     await expect(getRewardSettings(env, "guild-1")).resolves.toEqual({
       currencyName: "Bananas",
       dailyClaimAmount: 25,
-      holderDailyAmount: 4
+      holderDailyAmount: 4,
+      tipDailyLimit: 150
     });
     await expect(
       claimDailyPoints(env, "guild-1", "user-1", new Date("2026-07-22T12:00:00.000Z"))
@@ -222,7 +241,8 @@ describe("points ledger", () => {
     await expect(getRewardSettings(env, "guild-2")).resolves.toEqual({
       currencyName: "Points",
       dailyClaimAmount: 10,
-      holderDailyAmount: 0
+      holderDailyAmount: 0,
+      tipDailyLimit: 100
     });
   });
 
@@ -231,7 +251,8 @@ describe("points ledger", () => {
     db.settings.set("guild-1", {
       reward_currency_name: "Points",
       daily_claim_amount: 10,
-      holder_daily_amount: 5
+      holder_daily_amount: 5,
+      tip_daily_limit: 100
     });
     db.multipliers.set("role-1", 1);
     db.multipliers.set("role-2", 3);
@@ -253,5 +274,71 @@ describe("points ledger", () => {
         new Date("2026-07-23T12:00:00.000Z")
       )
     ).resolves.toEqual({ awarded: 5, balance: 25 });
+  });
+});
+
+describe("tipping", () => {
+  it("moves points between members and enforces the daily limit", async () => {
+    const env = createEnv();
+    await grantPoints(env, {
+      guildId: "guild-1",
+      discordUserId: "user-1",
+      amount: 150,
+      grantedBy: "manager-1"
+    });
+
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-2", amount: 60 })
+    ).resolves.toEqual({
+      amount: 60,
+      senderBalance: 90,
+      recipientBalance: 60,
+      currencyName: "Points"
+    });
+
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-2", amount: 50 })
+    ).rejects.toThrow("40");
+
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-2", amount: 40 })
+    ).resolves.toMatchObject({ senderBalance: 50, recipientBalance: 100 });
+    await expect(getPointsBalance(env, "guild-1", "user-1")).resolves.toBe(50);
+    await expect(getPointsBalance(env, "guild-1", "user-2")).resolves.toBe(100);
+  });
+
+  it("rejects self-tips, bad amounts, and empty balances", async () => {
+    const env = createEnv();
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-1", amount: 10 })
+    ).rejects.toBeInstanceOf(TipError);
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-2", amount: 0 })
+    ).rejects.toBeInstanceOf(TipError);
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-2", amount: 100001 })
+    ).rejects.toBeInstanceOf(TipError);
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-2", amount: 10 })
+    ).rejects.toThrow("not enough");
+  });
+
+  it("stops tipping when a server turns it off", async () => {
+    const env = createEnv();
+    await grantPoints(env, {
+      guildId: "guild-1",
+      discordUserId: "user-1",
+      amount: 50,
+      grantedBy: "manager-1"
+    });
+    await updateRewardSettings(env, "guild-1", {
+      currencyName: "Points",
+      dailyClaimAmount: 10,
+      holderDailyAmount: 0,
+      tipDailyLimit: 0
+    });
+    await expect(
+      tipPoints(env, { guildId: "guild-1", senderId: "user-1", recipientId: "user-2", amount: 10 })
+    ).rejects.toThrow("turned off");
   });
 });

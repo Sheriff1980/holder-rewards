@@ -280,7 +280,7 @@ describe("Cloudflare Worker", () => {
   });
 
   it("registers manager commands for NFT and token role rules", () => {
-    expect(discordCommands.map((command) => command.name)).toEqual(["verify", "points", "rules"]);
+    expect(discordCommands.map((command) => command.name)).toEqual(["verify", "points", "tip", "quests", "raffle", "store", "rules"]);
     for (const command of discordCommands) {
       expect(command.integration_types).toEqual([0]);
       expect(command.contexts).toEqual([0]);

@@ -11,6 +11,21 @@ import {
   removeIndexerConfig,
   saveIndexerConfig
 } from "./indexers.js";
+import { createQuest, listQuests, QuestError, removeQuest } from "./quests.js";
+import {
+  cancelRaffle,
+  createRaffle,
+  drawRaffle,
+  listRaffles,
+  RaffleError
+} from "./raffles.js";
+import {
+  createStoreItem,
+  listRecentPurchases,
+  listStoreItems,
+  removeStoreItem,
+  StoreError
+} from "./store.js";
 import { managerPage, setupPage, verifyPage } from "./html.js";
 import type { DiscordInteraction, Env, RoleSyncQueueMessage } from "./types.js";
 import { AdminError, listManageableDiscordRoles, requireAdminSession } from "./admin.js";
@@ -269,7 +284,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, hasIcon, hasLogo] = await Promise.all([
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, hasIcon, hasLogo] = await Promise.all([
         listChains(env),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
@@ -278,6 +293,10 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         getGuildOperations(env, session.guild_id),
         getWalletPrivacySettings(env, session.guild_id),
         listIndexerConfigs(env),
+        listQuests(env, session.guild_id),
+        listRaffles(env, session.guild_id),
+        listStoreItems(env, session.guild_id),
+        listRecentPurchases(env, session.guild_id),
         hasCurrencyIcon(env, session.guild_id),
         hasBrandLogo(env, session.guild_id)
       ]);
@@ -291,6 +310,10 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         operations,
         privacy,
         indexers,
+        quests,
+        raffles,
+        storeItems,
+        recentPurchases,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
           : null,
@@ -564,6 +587,135 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         ? jsonResponse({ ok: true })
         : jsonResponse({ error: "That holder rule was already removed." }, 404);
     }
+
+    if (request.method === "POST" && path === "quests") {
+      const input = (await request.json()) as Record<string, unknown>;
+      if (input.kind === "hold_role") {
+        const roles = await listManageableDiscordRoles(env, session.guild_id);
+        if (!roles.some((role) => role.id === input.roleId)) {
+          return jsonResponse({ error: "Choose a role below the bot's role in Discord." }, 400);
+        }
+      }
+      const quest = await createQuest(env, {
+        guildId: session.guild_id,
+        title: input.title,
+        kind: input.kind,
+        reward: input.reward,
+        roleId: input.roleId,
+        days: input.days,
+        code: input.code
+      });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "quest_created",
+        detail: `Quest "${quest.title}" (${quest.kind}, ${quest.reward} points)`
+      });
+      return jsonResponse({ ok: true, quest }, 201);
+    }
+
+    if (request.method === "DELETE" && path.startsWith("quests/")) {
+      const questId = path.slice("quests/".length);
+      const removed = await removeQuest(env, session.guild_id, questId);
+      if (removed) await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "quest_removed",
+        detail: `Quest ...${questId.slice(-6)} removed`
+      });
+      return removed
+        ? jsonResponse({ ok: true })
+        : jsonResponse({ error: "That quest was already removed." }, 404);
+    }
+
+    if (request.method === "POST" && path === "raffles") {
+      const input = (await request.json()) as Record<string, unknown>;
+      if (typeof input.prizeRoleId === "string" && input.prizeRoleId.length > 0) {
+        const roles = await listManageableDiscordRoles(env, session.guild_id);
+        if (!roles.some((role) => role.id === input.prizeRoleId)) {
+          return jsonResponse({ error: "Choose a prize role below the bot's role in Discord." }, 400);
+        }
+      }
+      const raffle = await createRaffle(env, {
+        guildId: session.guild_id,
+        title: input.title,
+        prize: input.prize,
+        prizeRoleId: input.prizeRoleId,
+        entryCost: input.entryCost,
+        maxEntriesPerMember: input.maxEntriesPerMember,
+        createdBy: session.discord_user_id
+      });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "raffle_created",
+        detail: `Raffle "${raffle.title}" (${raffle.entryCost} points per entry)`
+      });
+      return jsonResponse({ ok: true, raffle }, 201);
+    }
+
+    if (request.method === "POST" && path.startsWith("raffles/") && path.endsWith("/draw")) {
+      const raffleId = path.slice("raffles/".length, -"/draw".length);
+      const result = await drawRaffle(env, { guildId: session.guild_id, raffleId });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "raffle_drawn",
+        detail: `Raffle "${result.raffle.title}" drawn; winner ...${result.winnerDiscordUserId.slice(-6)}`
+      });
+      return jsonResponse(result);
+    }
+
+    if (request.method === "POST" && path.startsWith("raffles/") && path.endsWith("/cancel")) {
+      const raffleId = path.slice("raffles/".length, -"/cancel".length);
+      const result = await cancelRaffle(env, { guildId: session.guild_id, raffleId });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "raffle_cancelled",
+        detail: `Raffle "${result.raffle.title}" cancelled; ${result.refundedPoints} points refunded to ${result.refundedMembers} member(s)`
+      });
+      return jsonResponse(result);
+    }
+
+    if (request.method === "POST" && path === "store-items") {
+      const input = (await request.json()) as Record<string, unknown>;
+      if (typeof input.roleId === "string" && input.roleId.length > 0) {
+        const roles = await listManageableDiscordRoles(env, session.guild_id);
+        if (!roles.some((role) => role.id === input.roleId)) {
+          return jsonResponse({ error: "Choose a store role below the bot's role in Discord." }, 400);
+        }
+      }
+      const item = await createStoreItem(env, {
+        guildId: session.guild_id,
+        title: input.title,
+        description: input.description,
+        price: input.price,
+        roleId: input.roleId,
+        stock: input.stock
+      });
+      await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "store_item_created",
+        detail: `Store item "${item.title}" (${item.price} points)`
+      });
+      return jsonResponse({ ok: true, item }, 201);
+    }
+
+    if (request.method === "DELETE" && path.startsWith("store-items/")) {
+      const itemId = path.slice("store-items/".length);
+      const removed = await removeStoreItem(env, session.guild_id, itemId);
+      if (removed) await recordAuditEvent(env, {
+        guildId: session.guild_id,
+        actorDiscordUserId: session.discord_user_id,
+        action: "store_item_removed",
+        detail: `Store item ...${itemId.slice(-6)} removed`
+      });
+      return removed
+        ? jsonResponse({ ok: true })
+        : jsonResponse({ error: "That store item was already removed." }, 404);
+    }
   } catch (error) {
     if (error instanceof AdminError || error instanceof RuleError) {
       return jsonResponse({ error: error.message }, error.status);
@@ -578,6 +730,15 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
       return jsonResponse({ error: error.message }, 400);
     }
     if (error instanceof IndexerConfigError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof QuestError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof RaffleError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof StoreError) {
       return jsonResponse({ error: error.message }, 400);
     }
     if (error instanceof SyntaxError) {

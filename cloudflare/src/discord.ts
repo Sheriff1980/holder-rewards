@@ -16,10 +16,15 @@ import {
   getPointsBalance,
   getPointsLeaderboard,
   getRewardSettings,
-  grantPoints
+  grantPoints,
+  TipError,
+  tipPoints
 } from "./points.js";
 import { brandLogoUrl, currencyIconUrl, hasBrandLogo, hasCurrencyIcon } from "./assets.js";
 import { accentColorNumber, getGuildBranding } from "./branding.js";
+import { checkQuest, listQuestsWithStatus, QuestError, submitQuestCode } from "./quests.js";
+import { enterRaffle, listRaffleEntriesForMember, listRaffles, RaffleError } from "./raffles.js";
+import { listStoreItems, purchaseStoreItem, StoreError } from "./store.js";
 
 const EPHEMERAL = 1 << 6;
 const MANAGE_GUILD = 1n << 5n;
@@ -56,6 +61,68 @@ export const discordCommands = [
           { name: "member", description: "Member receiving the reward.", type: 6, required: true },
           { name: "amount", description: "Whole number of points.", type: 4, min_value: 1, max_value: 1000000, required: true },
           { name: "reason", description: "Optional reward note.", type: 3, max_length: 200 }
+        ]
+      }
+    ]
+  },
+  {
+    name: "tip",
+    description: "Send points to another server member.",
+    integration_types: [0],
+    contexts: [0],
+    options: [
+      { name: "member", description: "Member receiving the tip.", type: 6, required: true },
+      { name: "amount", description: "Whole number of points.", type: 4, min_value: 1, max_value: 100000, required: true }
+    ]
+  },
+  {
+    name: "quests",
+    description: "View and complete community quests.",
+    integration_types: [0],
+    contexts: [0],
+    options: [
+      { name: "list", description: "Show open quests and your progress.", type: 1 },
+      {
+        name: "code",
+        description: "Submit a secret quest code.",
+        type: 1,
+        options: [
+          { name: "code", description: "The secret code from the community.", type: 3, required: true, max_length: 100 }
+        ]
+      }
+    ]
+  },
+  {
+    name: "raffle",
+    description: "Enter community raffles with your points.",
+    integration_types: [0],
+    contexts: [0],
+    options: [
+      { name: "list", description: "Show open raffles and your entries.", type: 1 },
+      {
+        name: "enter",
+        description: "Buy raffle entries.",
+        type: 1,
+        options: [
+          { name: "count", description: "Number of entries to buy.", type: 4, min_value: 1, max_value: 100, required: true },
+          { name: "raffle", description: "Raffle ID (only needed with several open raffles).", type: 3, max_length: 40 }
+        ]
+      }
+    ]
+  },
+  {
+    name: "store",
+    description: "Spend points in the community store.",
+    integration_types: [0],
+    contexts: [0],
+    options: [
+      { name: "list", description: "Show items for sale.", type: 1 },
+      {
+        name: "buy",
+        description: "Buy a store item.",
+        type: 1,
+        options: [
+          { name: "item", description: "Item ID from /store list.", type: 3, required: true, max_length: 40 }
         ]
       }
     ]
@@ -367,6 +434,10 @@ function commandValue(interaction: DiscordInteraction, name: string): string | n
   return interaction.data?.options?.[0]?.options?.find((option) => option.name === name)?.value;
 }
 
+function topLevelCommandValue(interaction: DiscordInteraction, name: string): string | number | boolean | undefined {
+  return interaction.data?.options?.find((option) => option.name === name)?.value;
+}
+
 async function reserveDiscordInteraction(env: Env, interactionId: string): Promise<boolean> {
   const result = await env.DB.prepare(
     "INSERT OR IGNORE INTO discord_interactions (interaction_id) VALUES (?)"
@@ -474,6 +545,36 @@ export async function handleDiscordInteraction(
         ]
       }
     });
+  }
+
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("quest:check:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Quests are available inside a Discord server.");
+    }
+    const questId = interaction.data.custom_id.slice("quest:check:".length);
+    try {
+      const outcome = await checkQuest(env, interaction.guild_id, questId, discordUserId);
+      if (outcome.result === "completed") {
+        return ephemeralMessage(
+          `Quest complete: ${outcome.quest.title}. You earned ${outcome.quest.reward.toLocaleString()} points. New balance: ${outcome.balance.toLocaleString()}.`
+        );
+      }
+      if (outcome.result === "already_completed") {
+        return ephemeralMessage(`You already completed ${outcome.quest.title}.`);
+      }
+      const hint = outcome.quest.kind === "link_wallet"
+        ? "Link a wallet first with /verify."
+        : outcome.quest.kind === "hold_role"
+          ? "You do not have the required holder role yet."
+          : "You have not collected enough daily rewards yet. Use /points claim each day.";
+      return ephemeralMessage(`Not yet: ${hint}`);
+    } catch (error) {
+      if (error instanceof QuestError) {
+        return ephemeralMessage(error.message);
+      }
+      return ephemeralMessage("That quest could not be checked right now. Please try again shortly.");
+    }
   }
 
   if (interaction.type !== 2 || !interaction.data?.name) {
@@ -657,6 +758,208 @@ export async function handleDiscordInteraction(
       }
     } catch {
       return ephemeralMessage(`${env.REWARD_CURRENCY_NAME} are temporarily unavailable. Please try again shortly.`);
+    }
+  }
+
+  if (interaction.data.name === "tip") {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Tips are available inside a Discord server.");
+    }
+    const targetUserId = topLevelCommandValue(interaction, "member");
+    if (typeof targetUserId !== "string") {
+      return ephemeralMessage("Choose a server member to tip.");
+    }
+    try {
+      const memberResponse = await fetch(
+        `https://discord.com/api/v10/guilds/${interaction.guild_id}/members/${targetUserId}`,
+        { headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}` } }
+      );
+      if (memberResponse.status === 404) {
+        return ephemeralMessage("That member is not in this server.");
+      }
+      if (!memberResponse.ok) {
+        return ephemeralMessage("That member could not be checked. Please try again shortly.");
+      }
+      const member = (await memberResponse.json()) as { user?: { bot?: boolean } };
+      if (member.user?.bot) {
+        return ephemeralMessage("Bots do not need tips. Choose a server member instead.");
+      }
+      const [iconUrl, tip] = await Promise.all([
+        hasCurrencyIcon(env, interaction.guild_id).then((has) =>
+          has ? currencyIconUrl(requestUrl.origin, interaction.guild_id!) : null
+        ),
+        tipPoints(env, {
+          guildId: interaction.guild_id,
+          senderId: discordUserId,
+          recipientId: targetUserId,
+          amount: topLevelCommandValue(interaction, "amount")
+        })
+      ]);
+      return Response.json({
+        type: 4,
+        data: {
+          content: `<@${discordUserId}> tipped <@${targetUserId}> ${tip.amount.toLocaleString()} ${tip.currencyName}.`,
+          allowed_mentions: { parse: ["users"] },
+          ...(iconUrl ? { embeds: [{ thumbnail: { url: iconUrl } }] } : {})
+        }
+      });
+    } catch (error) {
+      if (error instanceof TipError) {
+        return ephemeralMessage(error.message);
+      }
+      return ephemeralMessage("The tip could not be sent. Please try again shortly.");
+    }
+  }
+
+  if (interaction.data.name === "quests") {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Quests are available inside a Discord server.");
+    }
+    try {
+      const settings = await getRewardSettings(env, interaction.guild_id);
+      if (subcommand === "code") {
+        const outcome = await submitQuestCode(env, interaction.guild_id, discordUserId, commandValue(interaction, "code"));
+        if (outcome.result === "no_match") {
+          return ephemeralMessage("That code did not match any open quest.");
+        }
+        if (outcome.result === "already_completed" || !outcome.quest) {
+          return ephemeralMessage(`You already completed ${outcome.quest?.title ?? "that quest"}.`);
+        }
+        return ephemeralMessage(
+          `Quest complete: ${outcome.quest.title}. You earned ${outcome.quest.reward.toLocaleString()} ${settings.currencyName}. New balance: ${outcome.balance.toLocaleString()}.`
+        );
+      }
+      const quests = await listQuestsWithStatus(env, interaction.guild_id, discordUserId);
+      if (quests.length === 0) {
+        return ephemeralMessage("This server has no open quests right now.");
+      }
+      const lines = quests.map((quest) => {
+        const detail = quest.kind === "link_wallet"
+          ? "Link a wallet"
+          : quest.kind === "hold_role"
+            ? "Hold the required role"
+            : quest.kind === "daily_claims"
+              ? `Collect daily rewards on ${quest.config.days} different days`
+              : "Submit the secret code with /quests code";
+        return `[${quest.completed ? "x" : " "}] ${quest.title} - ${detail} - ${quest.reward.toLocaleString()} ${settings.currencyName}`;
+      });
+      const checkable = quests.filter((quest) => !quest.completed && quest.kind !== "code").slice(0, 5);
+      return Response.json({
+        type: 4,
+        data: {
+          content: lines.join("\n").slice(0, 1_900),
+          flags: EPHEMERAL,
+          allowed_mentions: { parse: [] },
+          components: checkable.length > 0
+            ? [{
+                type: 1,
+                components: checkable.map((quest) => ({
+                  type: 2,
+                  style: 1,
+                  label: `Check: ${quest.title.slice(0, 60)}`,
+                  custom_id: `quest:check:${quest.id}`
+                }))
+              }]
+            : []
+        }
+      });
+    } catch (error) {
+      if (error instanceof QuestError) {
+        return ephemeralMessage(error.message);
+      }
+      return ephemeralMessage("Quests are temporarily unavailable. Please try again shortly.");
+    }
+  }
+
+  if (interaction.data.name === "raffle") {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Raffles are available inside a Discord server.");
+    }
+    try {
+      const settings = await getRewardSettings(env, interaction.guild_id);
+      if (subcommand === "enter") {
+        const open = (await listRaffles(env, interaction.guild_id)).filter((raffle) => raffle.status === "open");
+        if (open.length === 0) {
+          return ephemeralMessage("There are no open raffles right now.");
+        }
+        let raffleId = commandValue(interaction, "raffle");
+        if (typeof raffleId !== "string" || raffleId.length === 0) {
+          if (open.length > 1) {
+            return ephemeralMessage("Several raffles are open. Add the raffle ID from /raffle list to your entry.");
+          }
+          raffleId = open[0]!.id;
+        }
+        const entry = await enterRaffle(env, {
+          guildId: interaction.guild_id,
+          raffleId,
+          discordUserId,
+          count: commandValue(interaction, "count")
+        });
+        return ephemeralMessage(
+          `You bought ${entry.count} entr${entry.count === 1 ? "y" : "ies"} in ${entry.raffle.title} for ${entry.cost.toLocaleString()} ${entry.currencyName}. New balance: ${entry.balance.toLocaleString()}.`
+        );
+      }
+      const [raffles, myEntries] = await Promise.all([
+        listRaffles(env, interaction.guild_id),
+        listRaffleEntriesForMember(env, interaction.guild_id, discordUserId)
+      ]);
+      const open = raffles.filter((raffle) => raffle.status === "open");
+      if (open.length === 0) {
+        return ephemeralMessage("There are no open raffles right now.");
+      }
+      const lines = open.map((raffle) => {
+        const mine = myEntries.get(raffle.id) ?? 0;
+        return `[${raffle.id.slice(0, 8)}] ${raffle.title} - prize: ${raffle.prize} - ${raffle.entryCost.toLocaleString()} ${settings.currencyName}/entry - ${raffle.totalEntries.toLocaleString()} entries sold - you: ${mine}/${raffle.maxEntriesPerMember}`;
+      });
+      return ephemeralMessage(lines.join("\n").slice(0, 1_900));
+    } catch (error) {
+      if (error instanceof RaffleError) {
+        return ephemeralMessage(error.message);
+      }
+      return ephemeralMessage("Raffles are temporarily unavailable. Please try again shortly.");
+    }
+  }
+
+  if (interaction.data.name === "store") {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("The store is available inside a Discord server.");
+    }
+    try {
+      const settings = await getRewardSettings(env, interaction.guild_id);
+      if (subcommand === "buy") {
+        const itemId = commandValue(interaction, "item");
+        if (typeof itemId !== "string") {
+          return ephemeralMessage("Add the item ID from /store list to your purchase.");
+        }
+        const purchase = await purchaseStoreItem(env, {
+          guildId: interaction.guild_id,
+          itemId,
+          discordUserId
+        });
+        return ephemeralMessage(
+          `You bought ${purchase.item.title} for ${purchase.item.price.toLocaleString()} ${purchase.currencyName}. New balance: ${purchase.balance.toLocaleString()}.` +
+          (purchase.roleGranted ? " Your role was granted." : purchase.item.roleId ? "" : " A manager will fulfill your purchase.")
+        );
+      }
+      const items = await listStoreItems(env, interaction.guild_id);
+      if (items.length === 0) {
+        return ephemeralMessage("The store has no items for sale right now.");
+      }
+      const lines = items.map((item) => {
+        const stock = item.stock === null ? "unlimited" : `${item.stock} left`;
+        const description = item.description ? ` - ${item.description}` : "";
+        return `[${item.id.slice(0, 8)}] ${item.title} - ${item.price.toLocaleString()} ${settings.currencyName} - ${stock}${description}`;
+      });
+      return ephemeralMessage(lines.join("\n").slice(0, 1_900));
+    } catch (error) {
+      if (error instanceof StoreError) {
+        return ephemeralMessage(error.message);
+      }
+      return ephemeralMessage("The store is temporarily unavailable. Please try again shortly.");
     }
   }
 

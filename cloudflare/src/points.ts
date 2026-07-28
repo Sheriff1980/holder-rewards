@@ -6,12 +6,14 @@ type RewardSettingsRow = {
   reward_currency_name: string;
   daily_claim_amount: number;
   holder_daily_amount: number;
+  tip_daily_limit?: number;
 };
 
 export type RewardSettings = {
   currencyName: string;
   dailyClaimAmount: number;
   holderDailyAmount: number;
+  tipDailyLimit: number;
 };
 
 export class RewardSettingsError extends Error {}
@@ -36,13 +38,14 @@ function defaultSettings(env: Env): RewardSettings {
   return {
     currencyName: env.REWARD_CURRENCY_NAME || "Points",
     dailyClaimAmount: configuredDailyAmount(env),
-    holderDailyAmount: 0
+    holderDailyAmount: 0,
+    tipDailyLimit: 100
   };
 }
 
 export async function getRewardSettings(env: Env, guildId: string): Promise<RewardSettings> {
   const row = await env.DB.prepare(
-    "SELECT reward_currency_name, daily_claim_amount, holder_daily_amount FROM guild_settings WHERE guild_id = ?"
+    "SELECT reward_currency_name, daily_claim_amount, holder_daily_amount, tip_daily_limit FROM guild_settings WHERE guild_id = ?"
   )
     .bind(guildId)
     .first<RewardSettingsRow>();
@@ -50,7 +53,8 @@ export async function getRewardSettings(env: Env, guildId: string): Promise<Rewa
     ? {
         currencyName: row.reward_currency_name,
         dailyClaimAmount: row.daily_claim_amount,
-        holderDailyAmount: row.holder_daily_amount
+        holderDailyAmount: row.holder_daily_amount,
+        tipDailyLimit: Number.isSafeInteger(Number(row.tip_daily_limit)) ? Number(row.tip_daily_limit) : 100
       }
     : defaultSettings(env);
 }
@@ -58,7 +62,7 @@ export async function getRewardSettings(env: Env, guildId: string): Promise<Rewa
 export async function updateRewardSettings(
   env: Env,
   guildId: string,
-  input: { currencyName?: unknown; dailyClaimAmount?: unknown; holderDailyAmount?: unknown }
+  input: { currencyName?: unknown; dailyClaimAmount?: unknown; holderDailyAmount?: unknown; tipDailyLimit?: unknown }
 ): Promise<RewardSettings> {
   const currencyName = typeof input.currencyName === "string" ? input.currencyName.trim() : "";
   if (currencyName.length < 1 || currencyName.length > 32) {
@@ -72,6 +76,10 @@ export async function updateRewardSettings(
   if (!Number.isSafeInteger(holderDailyAmount) || holderDailyAmount < 0 || holderDailyAmount > 1_000_000) {
     throw new RewardSettingsError("Holder reward must be a whole number between 0 and 1,000,000.");
   }
+  const tipDailyLimit = Number(input.tipDailyLimit);
+  if (!Number.isSafeInteger(tipDailyLimit) || tipDailyLimit < 0 || tipDailyLimit > 1_000_000) {
+    throw new RewardSettingsError("Daily tipping limit must be a whole number between 0 and 1,000,000.");
+  }
   await env.DB.batch([
     env.DB.prepare(
       "INSERT INTO guilds (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
@@ -84,11 +92,12 @@ export async function updateRewardSettings(
        SET reward_currency_name = ?,
          daily_claim_amount = ?,
          holder_daily_amount = ?,
+         tip_daily_limit = ?,
          updated_at = CURRENT_TIMESTAMP
        WHERE guild_id = ?`
-    ).bind(currencyName, dailyClaimAmount, holderDailyAmount, guildId)
+    ).bind(currencyName, dailyClaimAmount, holderDailyAmount, tipDailyLimit, guildId)
   ]);
-  return { currencyName, dailyClaimAmount, holderDailyAmount };
+  return { currencyName, dailyClaimAmount, holderDailyAmount, tipDailyLimit };
 }
 
 type MultiplierRow = { role_id: string; reward_multiplier: number };
@@ -285,5 +294,103 @@ export async function grantPoints(
     amount,
     balance: await getPointsBalance(env, input.guildId, input.discordUserId),
     currencyName: (await getRewardSettings(env, input.guildId)).currencyName
+  };
+}
+
+export class TipError extends Error {}
+
+export type TipResult = {
+  amount: number;
+  senderBalance: number;
+  recipientBalance: number;
+  currencyName: string;
+};
+
+export async function tipPoints(
+  env: Env,
+  input: { guildId: string; senderId: string; recipientId: string; amount: unknown }
+): Promise<TipResult> {
+  const settings = await getRewardSettings(env, input.guildId);
+  if (settings.tipDailyLimit === 0) {
+    throw new TipError("Tipping is turned off in this server.");
+  }
+  const amount = Number(input.amount);
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 100_000) {
+    throw new TipError("Tip amount must be a whole number between 1 and 100,000.");
+  }
+  if (input.senderId === input.recipientId) {
+    throw new TipError("You cannot tip yourself.");
+  }
+  const day = new Date().toISOString().slice(0, 10);
+  const [senderBalance, tippedTodayRow] = await Promise.all([
+    getPointsBalance(env, input.guildId, input.senderId),
+    env.DB.prepare(
+      `SELECT COALESCE(SUM(-amount), 0) AS tipped
+       FROM point_transactions
+       WHERE guild_id = ? AND discord_user_id = ? AND amount < 0 AND source LIKE 'tip:%'
+         AND created_at >= ?`
+    )
+      .bind(input.guildId, input.senderId, `${day} 00:00:00`)
+      .first<{ tipped: number | string | null }>()
+  ]);
+  if (senderBalance < amount) {
+    throw new TipError(
+      `Your balance is ${senderBalance.toLocaleString()} ${settings.currencyName}. That is not enough for this tip.`
+    );
+  }
+  const tippedToday = numericBalance(tippedTodayRow?.tipped);
+  if (tippedToday + amount > settings.tipDailyLimit) {
+    const remaining = Math.max(0, settings.tipDailyLimit - tippedToday);
+    throw new TipError(
+      remaining === 0
+        ? `You reached today's tipping limit of ${settings.tipDailyLimit.toLocaleString()} ${settings.currencyName}.`
+        : `You can tip ${remaining.toLocaleString()} more ${settings.currencyName} today.`
+    );
+  }
+
+  const transferId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO discord_users (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
+    ).bind(input.senderId),
+    env.DB.prepare(
+      "INSERT INTO discord_users (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
+    ).bind(input.recipientId),
+    env.DB.prepare(
+      "INSERT INTO guilds (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
+    ).bind(input.guildId),
+    env.DB.prepare(
+      `INSERT INTO point_transactions (id, guild_id, discord_user_id, amount, source, metadata)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(
+      crypto.randomUUID(),
+      input.guildId,
+      input.senderId,
+      -amount,
+      `tip:${transferId}`,
+      JSON.stringify({ kind: "tip", direction: "sent", to: input.recipientId })
+    ),
+    env.DB.prepare(
+      `INSERT INTO point_transactions (id, guild_id, discord_user_id, amount, source, metadata)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(
+      crypto.randomUUID(),
+      input.guildId,
+      input.recipientId,
+      amount,
+      `tip:${transferId}`,
+      JSON.stringify({ kind: "tip", direction: "received", from: input.senderId })
+    )
+  ]);
+
+  const [senderAfter, recipientAfter] = await Promise.all([
+    getPointsBalance(env, input.guildId, input.senderId),
+    getPointsBalance(env, input.guildId, input.recipientId)
+  ]);
+  return {
+    amount,
+    senderBalance: senderAfter,
+    recipientBalance: recipientAfter,
+    currencyName: settings.currencyName
   };
 }

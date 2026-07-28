@@ -36,6 +36,8 @@ The hosted foundation is working. It currently provides:
 - Per-role Any/All requirement groups that can combine NFTs, traits, fungible tokens, and different chains.
 - Private linked-wallet management with account-scoped unlinking and immediate role refresh.
 - An append-only, per-server points ledger with browser-managed naming and currency images, daily claims, manager grants, balances, and a leaderboard.
+- Member tipping with a manager-controlled daily cap, and quests that pay once per member for linking a wallet, holding a role, collecting daily rewards, or submitting a secret code.
+- Point-priced raffles with weighted draws, automatic prize roles, and full refunds on cancellation, plus a points store with stock limits, automatic role grants, and safe rollback when Discord rejects a grant.
 - Per-server community branding with a display name, logo, and accessible accent color.
 - A manager overview for verified members, wallets, rules, rewards activity, scheduled checks, sync problems, and automatic blockchain-provider health checks with one-click retry.
 - An automatic first-page launch check for app data, Discord setup, and every enabled blockchain network.
@@ -48,7 +50,7 @@ The hosted foundation is working. It currently provides:
 - A working chain registry with Ethereum, Base, Polygon, Arbitrum One, ApeChain, Solana, and custom EVM networks.
 - A protected optional API for adding future EVM-compatible chains without changing core logic.
 
-EVM wallet linking supports EIP-6963 multi-wallet discovery, provider-neutral mobile wallet-browser handoff, browser-injected EOA wallets, and EIP-1271 contract signatures on configured networks. Solana linking supports Wallet Standard plus common injected wallets and verifies the exact challenge with Ed25519. Direct-RPC EVM holder roles, exact Solana mint/SPL-token balances, and per-role Any/All groups work without an indexer or additional provider key. Counterfactual smart accounts, quests, stores, and nested rule groups remain under development.
+EVM wallet linking supports EIP-6963 multi-wallet discovery, provider-neutral mobile wallet-browser handoff, browser-injected EOA wallets, and EIP-1271 contract signatures on configured networks. Solana linking supports Wallet Standard plus common injected wallets and verifies the exact challenge with Ed25519. Direct-RPC EVM holder roles, exact Solana mint/SPL-token balances, and per-role Any/All groups work without an indexer or additional provider key. Counterfactual smart accounts and nested rule groups remain under development.
 
 ## Deployment Choices
 

@@ -395,6 +395,10 @@ export function managerPage(env: Env): string {
                 <label for="holder-daily-amount">Daily holder reward</label>
                 <input id="holder-daily-amount" type="number" min="0" max="1000000" step="1" required>
               </div>
+              <div>
+                <label for="tip-daily-limit">Daily tipping limit per member</label>
+                <input id="tip-daily-limit" type="number" min="0" max="1000000" step="1" required>
+              </div>
             </div>
             <div class="form-actions"><button id="save-rewards" type="submit">Save rewards</button></div>
           </form>
@@ -477,6 +481,105 @@ export function managerPage(env: Env): string {
         <section class="panel">
           <h2>Active holder roles</h2>
           <div id="rule-list" class="rule-list"></div>
+        </section>
+        <section class="panel">
+          <h2>Quests</h2>
+          <form id="quest-form">
+            <div class="field-grid">
+              <div>
+                <label for="quest-title">Quest</label>
+                <input id="quest-title" maxlength="80" placeholder="Join the crew" required>
+              </div>
+              <div>
+                <label for="quest-kind">Type</label>
+                <select id="quest-kind">
+                  <option value="link_wallet">Link a wallet</option>
+                  <option value="hold_role">Hold a role</option>
+                  <option value="daily_claims">Collect daily rewards</option>
+                  <option value="code">Secret code</option>
+                </select>
+              </div>
+              <div>
+                <label for="quest-reward">Reward</label>
+                <input id="quest-reward" type="number" min="1" max="1000000" step="1" value="50" required>
+              </div>
+            </div>
+            <div id="quest-role-field" hidden>
+              <label for="quest-role">Required role</label>
+              <select id="quest-role"></select>
+            </div>
+            <div id="quest-days-field" hidden>
+              <label for="quest-days">Days with a daily claim</label>
+              <input id="quest-days" type="number" min="2" max="365" step="1" value="5">
+            </div>
+            <div id="quest-code-field" hidden>
+              <label for="quest-code">Secret code</label>
+              <input id="quest-code" maxlength="100" placeholder="Members submit this in Discord">
+            </div>
+            <div class="form-actions"><button id="save-quest" type="submit">Add quest</button></div>
+          </form>
+          <div id="quest-result" aria-live="polite"></div>
+          <div id="quest-list" class="rule-list"></div>
+        </section>
+        <section class="panel">
+          <h2>Raffles</h2>
+          <form id="raffle-form">
+            <div class="field-grid">
+              <div>
+                <label for="raffle-title">Raffle</label>
+                <input id="raffle-title" maxlength="80" placeholder="Friday giveaway" required>
+              </div>
+              <div>
+                <label for="raffle-prize">Prize</label>
+                <input id="raffle-prize" maxlength="120" placeholder="VIP role or a merch code" required>
+              </div>
+              <div>
+                <label for="raffle-prize-role">Automatic prize role</label>
+                <select id="raffle-prize-role"></select>
+              </div>
+              <div>
+                <label for="raffle-cost">Entry cost</label>
+                <input id="raffle-cost" type="number" min="1" max="1000000" step="1" value="25" required>
+              </div>
+              <div>
+                <label for="raffle-max-entries">Max entries per member</label>
+                <input id="raffle-max-entries" type="number" min="1" max="1000" step="1" value="10" required>
+              </div>
+            </div>
+            <div class="form-actions"><button id="save-raffle" type="submit">Open raffle</button></div>
+          </form>
+          <div id="raffle-result" aria-live="polite"></div>
+          <div id="raffle-list" class="rule-list"></div>
+        </section>
+        <section class="panel">
+          <h2>Store</h2>
+          <form id="store-form">
+            <div class="field-grid">
+              <div>
+                <label for="store-title">Item</label>
+                <input id="store-title" maxlength="80" placeholder="VIP role or merch code" required>
+              </div>
+              <div>
+                <label for="store-price">Price</label>
+                <input id="store-price" type="number" min="1" max="1000000" step="1" value="500" required>
+              </div>
+              <div>
+                <label for="store-role">Automatic role</label>
+                <select id="store-role"></select>
+              </div>
+              <div>
+                <label for="store-stock">Stock</label>
+                <input id="store-stock" type="number" min="1" max="10000" step="1" placeholder="Blank for unlimited">
+              </div>
+            </div>
+            <label for="store-description">Description</label>
+            <input id="store-description" maxlength="200" placeholder="What the buyer gets">
+            <div class="form-actions"><button id="save-store-item" type="submit">Add item</button></div>
+          </form>
+          <div id="store-result" aria-live="polite"></div>
+          <div id="store-list" class="rule-list"></div>
+          <h2>Recent purchases</h2>
+          <div id="purchase-list" class="rule-list"></div>
         </section>
         <section class="panel">
           <details>
@@ -580,6 +683,23 @@ export function managerPage(env: Env): string {
       const saveIndexer = document.getElementById("save-indexer");
       const removeIndexer = document.getElementById("remove-indexer");
       const indexerResult = document.getElementById("indexer-result");
+      const questForm = document.getElementById("quest-form");
+      const questKind = document.getElementById("quest-kind");
+      const questRole = document.getElementById("quest-role");
+      const saveQuest = document.getElementById("save-quest");
+      const questResult = document.getElementById("quest-result");
+      const questList = document.getElementById("quest-list");
+      const raffleForm = document.getElementById("raffle-form");
+      const rafflePrizeRole = document.getElementById("raffle-prize-role");
+      const saveRaffle = document.getElementById("save-raffle");
+      const raffleResult = document.getElementById("raffle-result");
+      const raffleList = document.getElementById("raffle-list");
+      const storeForm = document.getElementById("store-form");
+      const storeRole = document.getElementById("store-role");
+      const saveStoreItem = document.getElementById("save-store-item");
+      const storeResult = document.getElementById("store-result");
+      const storeList = document.getElementById("store-list");
+      const purchaseList = document.getElementById("purchase-list");
       const token = new URLSearchParams(location.search).get("token");
       let data;
 
@@ -1135,7 +1255,8 @@ export function managerPage(env: Env): string {
             body: JSON.stringify({
               currencyName: document.getElementById("currency-name").value,
               dailyClaimAmount: document.getElementById("daily-amount").value,
-              holderDailyAmount: document.getElementById("holder-daily-amount").value
+              holderDailyAmount: document.getElementById("holder-daily-amount").value,
+              tipDailyLimit: document.getElementById("tip-daily-limit").value
             })
           });
           data.rewards = saved.rewards;
@@ -1255,19 +1376,352 @@ export function managerPage(env: Env): string {
         }
       });
 
+      function updateQuestFields() {
+        const kind = questKind.value;
+        document.getElementById("quest-role-field").hidden = kind !== "hold_role";
+        document.getElementById("quest-days-field").hidden = kind !== "daily_claims";
+        document.getElementById("quest-code-field").hidden = kind !== "code";
+        questRole.required = kind === "hold_role";
+        document.getElementById("quest-days").required = kind === "daily_claims";
+        document.getElementById("quest-code").required = kind === "code";
+      }
+
+      function questSummary(quest) {
+        if (quest.kind === "link_wallet") return "Link a wallet";
+        if (quest.kind === "hold_role") {
+          const role = data.roles.find((candidate) => candidate.id === quest.config.roleId);
+          return "Hold role " + (role ? role.name : quest.config.roleId);
+        }
+        if (quest.kind === "daily_claims") return "Claim daily rewards on " + quest.config.days + " days";
+        return "Secret code";
+      }
+
+      function renderQuests() {
+        questList.replaceChildren();
+        if (!data.quests || !data.quests.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No quests yet. Members see them with /quests.";
+          questList.append(empty);
+          return;
+        }
+        for (const quest of data.quests) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const description = document.createElement("span");
+          description.textContent = quest.title + " - " + quest.reward.toLocaleString() + " points";
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          detail.textContent = questSummary(quest);
+          copy.append(description, detail);
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.dataset.questId = quest.id;
+          remove.textContent = "Remove";
+          row.append(copy, remove);
+          questList.append(row);
+        }
+      }
+
+      questKind.addEventListener("change", updateQuestFields);
+      questForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        saveQuest.disabled = true;
+        questResult.className = "";
+        questResult.textContent = "Adding quest...";
+        try {
+          const body = {
+            title: document.getElementById("quest-title").value.trim(),
+            kind: questKind.value,
+            reward: document.getElementById("quest-reward").value
+          };
+          if (questKind.value === "hold_role") body.roleId = questRole.value;
+          if (questKind.value === "daily_claims") body.days = document.getElementById("quest-days").value;
+          if (questKind.value === "code") body.code = document.getElementById("quest-code").value;
+          const saved = await api("quests", { method: "POST", body: JSON.stringify(body) });
+          data.quests = (data.quests || []).concat(saved.quest);
+          renderQuests();
+          questForm.reset();
+          updateQuestFields();
+          questResult.className = "success";
+          questResult.textContent = "Quest added. Members can see it with /quests.";
+        } catch (error) {
+          questResult.className = "error";
+          questResult.textContent = error instanceof Error ? error.message : "Quest could not be added.";
+        } finally {
+          saveQuest.disabled = false;
+        }
+      });
+
+      questList.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-quest-id]");
+        if (!button) return;
+        button.disabled = true;
+        try {
+          await api("quests/" + encodeURIComponent(button.dataset.questId), { method: "DELETE" });
+          data.quests = data.quests.filter((quest) => quest.id !== button.dataset.questId);
+          renderQuests();
+        } catch (error) {
+          questResult.className = "error";
+          questResult.textContent = error instanceof Error ? error.message : "Quest could not be removed.";
+          button.disabled = false;
+        }
+      });
+
+      function setPrizeRoleOptions() {
+        rafflePrizeRole.replaceChildren();
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = "None (manager fulfills the prize)";
+        rafflePrizeRole.append(none);
+        for (const role of data.roles) {
+          const option = document.createElement("option");
+          option.value = role.id;
+          option.textContent = role.name;
+          rafflePrizeRole.append(option);
+        }
+      }
+
+      function renderRaffles() {
+        raffleList.replaceChildren();
+        if (!data.raffles || !data.raffles.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No raffles yet. Members see them with /raffle list.";
+          raffleList.append(empty);
+          return;
+        }
+        for (const raffle of data.raffles) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const description = document.createElement("span");
+          description.textContent = raffle.title + " - prize: " + raffle.prize;
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          if (raffle.status === "open") {
+            detail.textContent = "Open - " + raffle.entryCost.toLocaleString() + " points/entry - " + raffle.totalEntries.toLocaleString() + " entries - id " + raffle.id.slice(0, 8);
+          } else if (raffle.status === "drawn") {
+            detail.textContent = "Drawn - winner ..." + String(raffle.winnerDiscordUserId).slice(-6) + " - " + raffle.totalEntries.toLocaleString() + " entries";
+          } else {
+            detail.textContent = "Cancelled - entries refunded";
+          }
+          copy.append(description, detail);
+          row.append(copy);
+          if (raffle.status === "open") {
+            const draw = document.createElement("button");
+            draw.type = "button";
+            draw.dataset.raffleDraw = raffle.id;
+            draw.textContent = "Draw winner";
+            const cancel = document.createElement("button");
+            cancel.type = "button";
+            cancel.dataset.raffleCancel = raffle.id;
+            cancel.textContent = "Cancel + refund";
+            row.append(draw, cancel);
+          }
+          raffleList.append(row);
+        }
+      }
+
+      raffleForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        saveRaffle.disabled = true;
+        raffleResult.className = "";
+        raffleResult.textContent = "Opening raffle...";
+        try {
+          const saved = await api("raffles", {
+            method: "POST",
+            body: JSON.stringify({
+              title: document.getElementById("raffle-title").value.trim(),
+              prize: document.getElementById("raffle-prize").value.trim(),
+              prizeRoleId: rafflePrizeRole.value || undefined,
+              entryCost: document.getElementById("raffle-cost").value,
+              maxEntriesPerMember: document.getElementById("raffle-max-entries").value
+            })
+          });
+          data.raffles = (data.raffles || []).concat(saved.raffle);
+          renderRaffles();
+          raffleForm.reset();
+          raffleResult.className = "success";
+          raffleResult.textContent = "Raffle open. Members enter with /raffle enter.";
+        } catch (error) {
+          raffleResult.className = "error";
+          raffleResult.textContent = error instanceof Error ? error.message : "Raffle could not be opened.";
+        } finally {
+          saveRaffle.disabled = false;
+        }
+      });
+
+      raffleList.addEventListener("click", async (event) => {
+        const drawButton = event.target.closest("button[data-raffle-draw]");
+        const cancelButton = event.target.closest("button[data-raffle-cancel]");
+        const button = drawButton || cancelButton;
+        if (!button) return;
+        button.disabled = true;
+        raffleResult.className = "";
+        raffleResult.textContent = drawButton ? "Drawing a winner..." : "Cancelling and refunding...";
+        try {
+          const id = drawButton ? button.dataset.raffleDraw : button.dataset.raffleCancel;
+          const action = drawButton ? "draw" : "cancel";
+          const outcome = await api("raffles/" + encodeURIComponent(id) + "/" + action, { method: "POST", body: "{}" });
+          const raffle = data.raffles.find((candidate) => candidate.id === id || candidate.id.startsWith(id));
+          if (drawButton) {
+            if (raffle) {
+              raffle.status = "drawn";
+              raffle.winnerDiscordUserId = outcome.winnerDiscordUserId;
+            }
+            raffleResult.className = "success";
+            raffleResult.textContent = "Winner: ..." + String(outcome.winnerDiscordUserId).slice(-6) + (outcome.roleGranted ? " (prize role granted)" : " (fulfill the prize manually)");
+          } else {
+            if (raffle) raffle.status = "cancelled";
+            raffleResult.className = "success";
+            raffleResult.textContent = "Raffle cancelled; " + outcome.refundedPoints.toLocaleString() + " points refunded to " + outcome.refundedMembers + " member(s).";
+          }
+          renderRaffles();
+        } catch (error) {
+          raffleResult.className = "error";
+          raffleResult.textContent = error instanceof Error ? error.message : "The raffle action failed.";
+          button.disabled = false;
+        }
+      });
+
+      function setStoreRoleOptions() {
+        storeRole.replaceChildren();
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = "None (manager fulfills the purchase)";
+        storeRole.append(none);
+        for (const role of data.roles) {
+          const option = document.createElement("option");
+          option.value = role.id;
+          option.textContent = role.name;
+          storeRole.append(option);
+        }
+      }
+
+      function renderStoreItems() {
+        storeList.replaceChildren();
+        if (!data.storeItems || !data.storeItems.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No store items yet. Members see them with /store list.";
+          storeList.append(empty);
+          return;
+        }
+        for (const item of data.storeItems) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const description = document.createElement("span");
+          description.textContent = item.title + " - " + item.price.toLocaleString() + " points";
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          const stock = item.stock === null ? "unlimited stock" : item.stock + " left";
+          detail.textContent = stock + " - " + item.sold.toLocaleString() + " sold - id " + item.id.slice(0, 8) + (item.description ? " - " + item.description : "");
+          copy.append(description, detail);
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.dataset.storeItemId = item.id;
+          remove.textContent = "Remove";
+          row.append(copy, remove);
+          storeList.append(row);
+        }
+      }
+
+      function renderPurchases() {
+        purchaseList.replaceChildren();
+        if (!data.recentPurchases || !data.recentPurchases.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No purchases yet.";
+          purchaseList.append(empty);
+          return;
+        }
+        for (const purchase of data.recentPurchases) {
+          const row = document.createElement("div");
+          row.className = "activity-row";
+          const copy = document.createElement("div");
+          const description = document.createElement("span");
+          description.textContent = purchase.itemTitle + " - " + purchase.pricePaid.toLocaleString() + " points";
+          const buyer = document.createElement("span");
+          buyer.className = "muted";
+          buyer.textContent = "member ..." + purchase.discordUserId.slice(-6);
+          copy.append(description, buyer);
+          const time = document.createElement("time");
+          time.dateTime = purchase.createdAt;
+          time.textContent = new Date(purchase.createdAt.replace(" ", "T") + "Z").toLocaleString();
+          row.append(copy, time);
+          purchaseList.append(row);
+        }
+      }
+
+      storeForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        saveStoreItem.disabled = true;
+        storeResult.className = "";
+        storeResult.textContent = "Adding item...";
+        try {
+          const saved = await api("store-items", {
+            method: "POST",
+            body: JSON.stringify({
+              title: document.getElementById("store-title").value.trim(),
+              description: document.getElementById("store-description").value.trim() || undefined,
+              price: document.getElementById("store-price").value,
+              roleId: storeRole.value || undefined,
+              stock: document.getElementById("store-stock").value || undefined
+            })
+          });
+          data.storeItems = (data.storeItems || []).concat(saved.item);
+          renderStoreItems();
+          storeForm.reset();
+          storeResult.className = "success";
+          storeResult.textContent = "Item added. Members can buy it with /store buy.";
+        } catch (error) {
+          storeResult.className = "error";
+          storeResult.textContent = error instanceof Error ? error.message : "Item could not be added.";
+        } finally {
+          saveStoreItem.disabled = false;
+        }
+      });
+
+      storeList.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-store-item-id]");
+        if (!button) return;
+        button.disabled = true;
+        try {
+          await api("store-items/" + encodeURIComponent(button.dataset.storeItemId), { method: "DELETE" });
+          data.storeItems = data.storeItems.filter((item) => item.id !== button.dataset.storeItemId);
+          renderStoreItems();
+        } catch (error) {
+          storeResult.className = "error";
+          storeResult.textContent = error instanceof Error ? error.message : "Item could not be removed.";
+          button.disabled = false;
+        }
+      });
+
       async function initialize() {
         if (!token) throw new Error("This manager link is invalid or incomplete.");
         data = await api("session");
         setOptions(roleInput, data.roles);
         setOptions(chainInput, data.chains);
         setOptions(indexerChain, data.chains);
+        setOptions(questRole, data.roles);
         renderIndexerForm();
+        updateQuestFields();
+        renderQuests();
+        setPrizeRoleOptions();
+        renderRaffles();
+        setStoreRoleOptions();
+        renderStoreItems();
+        renderPurchases();
         syncMatchModeForRole();
         document.getElementById("community-name").value = data.branding.name;
         document.getElementById("accent-color").value = data.branding.accentColor;
         document.getElementById("currency-name").value = data.rewards.currencyName;
         document.getElementById("daily-amount").value = data.rewards.dailyClaimAmount;
         document.getElementById("holder-daily-amount").value = data.rewards.holderDailyAmount;
+        document.getElementById("tip-daily-limit").value = data.rewards.tipDailyLimit;
         fullWalletAddresses.checked = data.privacy.managersCanViewFullAddresses;
         renderCurrencyIcon();
         renderBrandLogo();
