@@ -84,13 +84,19 @@ See [updates and recovery](docs/UPGRADES_AND_RECOVERY.md) for D1 migrations, bac
 
 The [Cloudflare release notes](docs/CLOUDFLARE.md) are for project developers maintaining the public deployment template. They are not operator setup instructions.
 
-### VPS / Self-Hosted Node
+### Self-Host On A Windows Computer
 
-An advanced path for operators who prefer running the bot on their own Linux server (Hostinger VPS, home server, or similar). It runs the same application code and features over a local SQLite database. The Cloudflare path remains the recommended default; choose this only if you are comfortable running a Node.js service.
+An advanced path for running the bot on a Windows computer that remains powered on. It uses the same application and a local SQLite database, with a Cloudflare Tunnel providing the permanent HTTPS address Discord requires.
 
-See [VPS deployment](docs/VPS.md) for setup, HTTPS, systemd, updates, and backups.
+See [Windows self-hosting](docs/LOCAL_SELF_HOST.md) for installation, HTTPS, automatic startup, updates, and backups.
 
-### Local Development
+### Host On A Linux VPS
+
+An advanced path for a Hostinger, DigitalOcean, Hetzner, or similar Ubuntu VPS. It uses the same Node application and SQLite database, with Caddy providing HTTPS.
+
+See [VPS deployment](docs/VPS.md) for the complete Ubuntu setup.
+
+### Developer Preview
 
 Requirements: Node.js 22+ and pnpm 9+.
 

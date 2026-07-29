@@ -7,6 +7,7 @@ import worker from "@holder-rewards/worker";
 import type { Env } from "@holder-rewards/worker/types";
 import { createNodeD1 } from "../src/db.js";
 import { applyMigrations } from "../src/migrate.js";
+import { buildPublicRequestUrl, normalizePublicAppUrl } from "../src/env.js";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../../../migrations", import.meta.url));
 
@@ -48,6 +49,25 @@ describe("D1 shim", () => {
 
     const rows = await db.prepare("SELECT id FROM items ORDER BY id").all<{ id: string }>();
     expect(rows.results).toEqual([{ id: "a" }, { id: "b" }]);
+  });
+});
+
+describe("public app URL", () => {
+  it("accepts a fixed HTTPS origin and local HTTP testing", () => {
+    expect(normalizePublicAppUrl("https://rewards.example.com")).toBe("https://rewards.example.com");
+    expect(normalizePublicAppUrl("http://localhost:8787")).toBe("http://localhost:8787");
+  });
+
+  it("rejects missing, insecure, and path-based public addresses", () => {
+    expect(() => normalizePublicAppUrl(undefined)).toThrow("PUBLIC_APP_URL is required");
+    expect(() => normalizePublicAppUrl("http://rewards.example.com")).toThrow("must use https://");
+    expect(() => normalizePublicAppUrl("https://rewards.example.com/setup")).toThrow("only the site address");
+  });
+
+  it("never allows an incoming request target to replace the configured host", () => {
+    expect(
+      buildPublicRequestUrl("https://rewards.example.com", "https://attacker.example/interactions?test=1").toString()
+    ).toBe("https://rewards.example.com/interactions?test=1");
   });
 });
 
@@ -93,6 +113,15 @@ describe("worker over the Node host", () => {
   it("serves health checks from the same handler", async () => {
     const response = await worker.fetch(new Request("http://localhost/health"), nodeEnv(), context);
     expect(response.status).toBe(200);
+  });
+
+  it("runs the scheduled maintenance job over the SQLite adapter", async () => {
+    const env = nodeEnv();
+    await worker.scheduled({} as unknown as ScheduledController, env);
+    const state = await env.DB.prepare(
+      "SELECT value FROM app_state WHERE key = 'last_scheduled_run'"
+    ).first<{ value: string }>();
+    expect(state?.value).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("renders the setup page even when Discord is unreachable", async () => {

@@ -5,7 +5,7 @@ import worker from "@holder-rewards/worker";
 import type { Env } from "@holder-rewards/worker/types";
 import { createNodeD1 } from "./db.js";
 import { applyMigrations } from "./migrate.js";
-import { loadConfig } from "./env.js";
+import { buildPublicRequestUrl, loadConfig } from "./env.js";
 
 const SCHEDULE_INTERVAL_MS = 15 * 60 * 1000;
 const SCHEDULE_START_DELAY_MS = 30 * 1000;
@@ -35,10 +35,9 @@ const server = createServer(async (req, res) => {
     for (const [key, value] of Object.entries(req.headers)) {
       if (typeof value === "string") headers.set(key, value);
     }
-    const host = req.headers.host ?? `localhost:${config.port}`;
-    const proto = req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
     const method = req.method ?? "GET";
-    const request = new Request(`${proto}://${host}${req.url ?? "/"}`, {
+    const requestUrl = buildPublicRequestUrl(config.publicAppUrl, req.url ?? "/");
+    const request = new Request(requestUrl, {
       method,
       headers,
       body: body.length > 0 && method !== "GET" && method !== "HEAD" ? body : undefined
@@ -61,16 +60,25 @@ const server = createServer(async (req, res) => {
 });
 
 async function runScheduled(): Promise<void> {
+  if (scheduledRunActive) {
+    console.warn("Skipping scheduled job because the previous run is still active.");
+    return;
+  }
+  scheduledRunActive = true;
   try {
     await worker.scheduled({} as unknown as ScheduledController, env);
   } catch (error) {
     console.error("Scheduled job failed", error);
+  } finally {
+    scheduledRunActive = false;
   }
 }
 
+let scheduledRunActive = false;
+
 server.listen(config.port, () => {
   console.log(`${config.appName} listening on http://localhost:${config.port}`);
-  console.log("Put HTTPS in front of this (see docs/VPS.md), then open your public URL to finish setup.");
+  console.log(`Public app URL: ${config.publicAppUrl}`);
   setTimeout(() => void runScheduled(), SCHEDULE_START_DELAY_MS);
   setInterval(() => void runScheduled(), SCHEDULE_INTERVAL_MS);
 });

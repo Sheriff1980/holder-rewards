@@ -5,6 +5,7 @@ export type NodeConfig = {
   port: number;
   dataDir: string;
   migrationsDir: string;
+  publicAppUrl: string;
   discordBotToken: string;
   appName: string;
   rewardCurrencyName: string;
@@ -19,6 +20,36 @@ function loadDotEnv(path: string): void {
     if (!match || process.env[match[1]] !== undefined) continue;
     process.env[match[1]] = match[2].replace(/^["']|["']$/g, "");
   }
+}
+
+export function normalizePublicAppUrl(value: string | undefined): string {
+  if (!value) {
+    throw new Error(
+      "PUBLIC_APP_URL is required. Use your public https:// address, or http://localhost:8787 for local-only testing."
+    );
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("PUBLIC_APP_URL must be a complete URL such as https://rewards.example.com.");
+  }
+
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
+    throw new Error("PUBLIC_APP_URL must use https:// unless it points to localhost.");
+  }
+  if (url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
+    throw new Error("PUBLIC_APP_URL must contain only the site address, without a path, login, query, or fragment.");
+  }
+
+  return url.origin;
+}
+
+export function buildPublicRequestUrl(publicAppUrl: string, requestTarget: string): URL {
+  const incomingUrl = new URL(requestTarget, "http://holder-rewards.invalid");
+  return new URL(`${incomingUrl.pathname}${incomingUrl.search}`, publicAppUrl);
 }
 
 export function loadConfig(): NodeConfig {
@@ -36,10 +67,18 @@ export function loadConfig(): NodeConfig {
     console.error("PORT must be a whole number between 1 and 65535.");
     process.exit(1);
   }
+  let publicAppUrl: string;
+  try {
+    publicAppUrl = normalizePublicAppUrl(process.env.PUBLIC_APP_URL);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "PUBLIC_APP_URL is invalid.");
+    process.exit(1);
+  }
   return {
     port,
     dataDir: process.env.DATA_DIR ?? "./data",
     migrationsDir: process.env.MIGRATIONS_DIR ?? fileURLToPath(new URL("../../../migrations", import.meta.url)),
+    publicAppUrl,
     discordBotToken: token,
     appName: process.env.APP_NAME ?? "Holder Rewards",
     rewardCurrencyName: process.env.REWARD_CURRENCY_NAME ?? "Points",
