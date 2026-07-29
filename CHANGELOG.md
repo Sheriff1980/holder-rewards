@@ -4,6 +4,8 @@ All notable changes to Holder Rewards will be documented here. The project follo
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-28
+
 ### Added
 
 - Optional per-chain NFT indexers managed from the browser manager's advanced network settings: Alchemy-compatible NFT APIs unlock EVM trait rules on large or non-enumerable collections, and DAS-compatible endpoints (for example Helius) enable collection-wide Solana NFT rules.
