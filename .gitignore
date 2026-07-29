@@ -9,6 +9,7 @@ dist/
 coverage/
 .turbo/
 TODO.md
+apps/node/data/
 .wrangler/
 .playwright-cli/
 output/

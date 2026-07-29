@@ -4,6 +4,10 @@ All notable changes to Holder Rewards will be documented here. The project follo
 
 ## Unreleased
 
+### Added
+
+- Self-hosted Node deployment path (`apps/node`): the full application runs on any VPS with Node 22+ over a local SQLite database, sharing the worker's code, migrations, and features. Includes a D1-compatible database shim, automatic migrations at startup, a cron-driven scheduled job, and a VPS guide covering HTTPS with Caddy, systemd, updates, and backups.
+
 ## 0.3.0 - 2026-07-28
 
 ### Added

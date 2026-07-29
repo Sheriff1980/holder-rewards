@@ -4,10 +4,14 @@ A printable run-through for testing a new deployment with a real community. Work
 
 ## 1. Discord Layout
 
-- [ ] Create a "HOLDERS" channel category in the test server.
-- [ ] `#verify-here` — verification panel will be posted here.
-- [ ] `#lounge` — permissions locked so only the holder role can see it.
-- [ ] `#sales-feed` — sales bot posts (optional, step 7).
+Create a "Rewards" channel category in the test server. No channel needs member typing: everything works through slash commands, buttons, and popups, and most bot replies are visible only to the member who ran the command.
+
+- [ ] `#rewards-verify` — visible to *everyone including unverified members*; deny member messages; verification panel goes here.
+- [ ] `#token-drop` — Holder role only; app commands allowed, member messages denied; daily `/points claim`.
+- [ ] `#quests` — Holder role only; same permissions; proof submissions arrive via popup, never in the channel.
+- [ ] `#raffles` — Holder role only; same permissions.
+- [ ] `#shop` — Holder role only; same permissions (optional).
+- [ ] `#sales-feed` — fully read-only for members; only the sales bot posts (optional, step 7).
 - [ ] Create a holder role (e.g. "Holder") and move the bot's role above it.
 
 ## 2. Deploy Like A Stranger

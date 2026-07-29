@@ -84,6 +84,12 @@ See [updates and recovery](docs/UPGRADES_AND_RECOVERY.md) for D1 migrations, bac
 
 The [Cloudflare release notes](docs/CLOUDFLARE.md) are for project developers maintaining the public deployment template. They are not operator setup instructions.
 
+### VPS / Self-Hosted Node
+
+An advanced path for operators who prefer running the bot on their own Linux server (Hostinger VPS, home server, or similar). It runs the same application code and features over a local SQLite database. The Cloudflare path remains the recommended default; choose this only if you are comfortable running a Node.js service.
+
+See [VPS deployment](docs/VPS.md) for setup, HTTPS, systemd, updates, and backups.
+
 ### Local Development
 
 Requirements: Node.js 22+ and pnpm 9+.
@@ -100,6 +106,7 @@ Wrangler prints the local URL. The default is usually `http://localhost:8787`.
 ## Repository Layout
 
 - `apps/worker`: recommended serverless Discord/web application.
+- `apps/node`: self-hosted Node/VPS build of the same application.
 - `migrations`: Cloudflare D1 migrations.
 - `packages/chains`: replaceable wallet and ownership adapters.
 

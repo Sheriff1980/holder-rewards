@@ -1,0 +1,25 @@
+{
+  "name": "@holder-rewards/node",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter @holder-rewards/worker build && tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "dev": "pnpm build && pnpm start",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @holder-rewards/worker build && vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@holder-rewards/worker": "workspace:*",
+    "better-sqlite3": "^12.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260729.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.4"
+  }
+}
