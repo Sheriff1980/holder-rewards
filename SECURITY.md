@@ -46,4 +46,4 @@ Daily claims use an append-only ledger and one claim per Discord member, server,
 
 ## Reporting Vulnerabilities
 
-Do not open a public issue containing secrets, private links, or exploit details. Use the repository's private vulnerability-reporting feature when it becomes available, or contact the repository owner privately. Add a project contact address before the first public release.
+Do not open a public issue containing secrets, private links, or exploit details. Report vulnerabilities through GitHub's private vulnerability reporting on this repository (Security tab → Advisories → Report a vulnerability), or contact the repository owner privately.
