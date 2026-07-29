@@ -369,8 +369,7 @@ describe("ownership cache keys", () => {
   });
 });
 
-describe("nested requirement groups", () => {
-  const GUILD = "123456789012345678";
+describe("nested requirement groups", () => {  const GUILD = "123456789012345678";
   const ROLE = "223456789012345678";
   const USER = "323456789012345678";
   const WALLET = "0x00000000000000000000000000000000000000ff";
@@ -469,5 +468,76 @@ describe("nested requirement groups", () => {
     expect(summary.added).toEqual([]);
     expect(summary.unchanged).toEqual([ROLE]);
     expect(added).toHaveLength(0);
+  });
+});
+
+describe("demo chain", () => {
+  const GUILD = "123456789012345678";
+  const ROLE = "223456789012345678";
+  const USER = "323456789012345678";
+
+  function demoEnv(hasWallet: boolean) {
+    return {
+      APP_NAME: "Holder Rewards",
+      DISCORD_BOT_TOKEN: "test-token",
+      DB: {
+        prepare: (sql: string) => {
+          const statement = {
+            all: async () => {
+              if (sql.includes("enabled = 1 ORDER BY")) {
+                return {
+                  results: [{
+                    id: "demo-rule",
+                    guild_id: GUILD,
+                    role_id: ROLE,
+                    chain: "mock",
+                    match_mode: "any",
+                    reward_multiplier: 1,
+                    rule: JSON.stringify({
+                      type: "erc721",
+                      contractAddress: "0x00000000000000000000000000000000000000d1",
+                      minCount: 1
+                    })
+                  }]
+                };
+              }
+              if (sql.includes("SELECT DISTINCT retired.role_id")) return { results: [] };
+              if (sql.includes("FROM wallets")) {
+                return {
+                  results: hasWallet ? [{ chain: "evm", address: "0x00000000000000000000000000000000000000ff" }] : []
+                };
+              }
+              if (sql.includes("FROM chain_configs")) return { results: [] };
+              throw new Error(`Unexpected query: ${sql}`);
+            },
+            first: async () => null,
+            run: async () => ({ success: true, meta: { changes: 1 } }),
+            bind: () => statement
+          };
+          return statement;
+        }
+      }
+    } as unknown as Env;
+  }
+
+  it("qualifies any member with a linked wallet, no RPC needed", async () => {
+    const added: string[] = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        added.push(String(input));
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({ roles: [] });
+    });
+    const summary = await syncMemberRoles(demoEnv(true), GUILD, USER, { bypassOwnershipCache: true });
+    expect(summary.qualified).toEqual([ROLE]);
+    expect(summary.added).toEqual([ROLE]);
+  });
+
+  it("does not qualify without a linked wallet", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ roles: [] }));
+    const summary = await syncMemberRoles(demoEnv(false), GUILD, USER, { bypassOwnershipCache: true });
+    expect(summary.qualified).toEqual([]);
+    expect(summary.unchanged).toEqual([ROLE]);
   });
 });

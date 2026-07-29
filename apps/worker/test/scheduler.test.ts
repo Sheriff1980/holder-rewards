@@ -61,7 +61,11 @@ class SchedulerStatement {
       if (member) member.last_sync_error = this.values[1] === null ? null : String(this.values[1]);
     }
     if (this.sql.includes("INSERT INTO app_state")) {
-      this.db.cursor = String(this.values[1]);
+      if (this.sql.includes("'last_queue_run'")) {
+        this.db.lastQueueRun = String(this.values[0]);
+      } else if (this.values[0] === "scheduled_role_sync_cursor") {
+        this.db.cursor = String(this.values[1]);
+      }
     }
     return { success: true, meta: { changes: 1 } } as D1Result;
   }
@@ -69,6 +73,7 @@ class SchedulerStatement {
 
 class SchedulerDb {
   cursor: string | null = null;
+  lastQueueRun: string | null = null;
   members: Member[] = ["1", "2", "3"].map((user) => ({
     guild_id: "100000000000000",
     discord_user_id: `20000000000000${user}`,
@@ -198,5 +203,6 @@ describe("scheduled role synchronization", () => {
     );
 
     expect(retried.map((userId) => userId.slice(-1))).toEqual(["2"]);
+    expect(db.lastQueueRun).not.toBeNull();
   });
 });

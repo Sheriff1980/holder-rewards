@@ -17,6 +17,8 @@ All notable changes to Holder Rewards will be documented here. The project follo
 - Custom proof quests: members paste proof (links or text) in a Discord popup, and managers approve (automatic payout) or reject from a review queue in the browser manager.
 - Nested requirement groups: each holder role combines named Any/All rule groups under the role's own Any/All mode, covering logic such as `(NFT A OR NFT B) AND Token C`. Existing roles keep their behavior unchanged in a default Main group.
 - Sales bot: per-collection watches post new EVM NFT sales (name, image, price, marketplace, buyer, seller, transaction link) to a manager-chosen Discord channel from the scheduled job, using the optional indexer configuration; failures are recorded per watch without affecting others.
+- Demo Chain (testing) network for end-to-end deployment testing without real assets: manager-created rules on it qualify any member with a linked wallet.
+- Queue offload status in the manager overview, showing whether the optional Cloudflare Queue is configured and when it last processed revalidations.
 
 ### Removed
 

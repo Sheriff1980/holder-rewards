@@ -293,8 +293,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, hasIcon, hasLogo] = await Promise.all([
-        listChains(env),
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, queue, hasIcon, hasLogo] = await Promise.all([
+        listChains(env, { includeDemo: true }),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
         getRewardSettings(env, session.guild_id),
@@ -309,12 +309,15 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         listPendingSubmissions(env, session.guild_id),
         listSalesWatches(env, session.guild_id),
         listTextChannels(env, session.guild_id).catch(() => []),
+        env.DB.prepare("SELECT value FROM app_state WHERE key = 'last_queue_run'")
+          .first<{ value: string }>()
+          .then((row) => ({ enabled: Boolean(env.ROLE_SYNC_QUEUE), lastRunAt: row?.value ?? null })),
         hasCurrencyIcon(env, session.guild_id),
         hasBrandLogo(env, session.guild_id)
       ]);
       return jsonResponse({
         expiresAt: session.expires_at,
-        chains: chains.filter((chain) => chain.family === "evm" || chain.family === "solana"),
+        chains: chains.filter((chain) => chain.family === "evm" || chain.family === "solana" || chain.family === "mock"),
         roles,
         rules,
         rewards,
@@ -329,6 +332,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         pendingSubmissions,
         salesWatches,
         channels,
+        queue,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
           : null,

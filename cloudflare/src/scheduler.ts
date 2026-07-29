@@ -181,6 +181,11 @@ export async function processRoleSyncQueue(
       message.retry();
     }
   }
+  await env.DB.prepare(
+    "INSERT INTO app_state (key, value, updated_at) VALUES ('last_queue_run', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP"
+  )
+    .bind(new Date().toISOString())
+    .run();
 }
 
 export async function retryFailedRoleSyncs(

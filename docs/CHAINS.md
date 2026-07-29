@@ -26,6 +26,10 @@ Everything in the default path works keyless. Two optional capabilities unlock w
 
 Indexer URLs may contain API keys. They are stored in the deployment's `indexer_configs` table as configuration, not as encrypted secrets, and are visible to anyone holding a private manager link for the deployment. Keep manager links private, prefer provider dashboards that allow key restrictions, and rotate a key if it may have leaked. The manager health check probes configured indexers alongside RPC providers and offers one-click retry.
 
+## Demo Chain (Testing)
+
+The built-in **Demo Chain (testing)** network exists so a new deployment can be tested end-to-end without owning any NFTs. It appears only in the browser manager's holder-rule network list. Any rule created on it qualifies for every member who has at least one linked wallet — no RPC, indexer, or real assets involved. Create a rule on it, link a wallet through the normal verification flow, and watch the role and points arrive; remove the rule when done testing. Demo Chain rules never appear in wallet linking, provider health checks, or sales watches.
+
 ## Custom Chains
 
 Normal operators add a custom EVM-compatible network from `/rules manage` under **Advanced network settings**. Definitions are stored in the deployment's `chain_configs` table and immediately appear in the holder-rule network list.

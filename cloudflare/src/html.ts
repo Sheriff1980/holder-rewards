@@ -313,6 +313,7 @@ export function managerPage(env: Env): string {
             <div class="metric"><strong id="metric-points">0</strong><span>Reward entries</span></div>
             <div class="metric"><strong id="metric-problems">0</strong><span>Sync problems</span></div>
             <div class="metric"><strong id="metric-scheduled">Never</strong><span>Last scheduled check</span></div>
+            <div class="metric"><strong id="metric-queue">Off</strong><span>Queue offload</span></div>
           </div>
           <div id="sync-problem-area" class="notice" hidden>
             <p id="sync-alert"></p>
@@ -901,6 +902,12 @@ export function managerPage(env: Env): string {
         document.getElementById("metric-scheduled").textContent = operations.lastScheduledRun
           ? new Date(operations.lastScheduledRun).toLocaleString()
           : "Never";
+        const queueInfo = data.queue || { enabled: false, lastRunAt: null };
+        document.getElementById("metric-queue").textContent = !queueInfo.enabled
+          ? "Off"
+          : queueInfo.lastRunAt
+            ? new Date(queueInfo.lastRunAt).toLocaleString()
+            : "Waiting";
         const alert = document.getElementById("sync-alert");
         syncProblemArea.hidden = operations.syncProblems === 0;
         alert.textContent = operations.syncProblems === 1
@@ -1098,7 +1105,7 @@ export function managerPage(env: Env): string {
           data.chains = data.chains.filter((chain) => chain.id !== saved.chain.id);
           data.chains.push(saved.chain);
           setOptions(chainInput, data.chains);
-          setOptions(indexerChain, data.chains);
+          setOptions(indexerChain, data.chains.filter((chain) => chain.family !== "mock"));
           renderIndexerForm();
           updateFields();
           customChainForm.reset();
@@ -1979,7 +1986,7 @@ export function managerPage(env: Env): string {
         data = await api("session");
         setOptions(roleInput, data.roles);
         setOptions(chainInput, data.chains);
-        setOptions(indexerChain, data.chains);
+        setOptions(indexerChain, data.chains.filter((chain) => chain.family !== "mock"));
         setOptions(questRole, data.roles);
         renderIndexerForm();
         updateQuestFields();

@@ -337,12 +337,12 @@ export async function addRoleRule(
   const roleId = requireSnowflake(input.roleId, "Role");
   if (roleId === guildId) throw new RuleError("The @everyone role cannot be managed by a holder rule.");
   if (typeof input.chainId !== "string") throw new RuleError("Chain is required.");
-  const chain = (await listChains(env)).find((candidate) => candidate.id === input.chainId);
+  const chain = (await listChains(env, { includeDemo: true })).find((candidate) => candidate.id === input.chainId);
   const expectedFamily = input.type === "spl-token" || input.type === "solana-collection" ? "solana" : "evm";
-  if (!chain || chain.family !== expectedFamily) {
+  if (!chain || (chain.family !== expectedFamily && !(expectedFamily === "evm" && chain.family === "mock"))) {
     throw new RuleError(`Choose an enabled ${expectedFamily === "solana" ? "Solana" : "EVM"} chain.`);
   }
-  if (!chain.defaultRpcUrl) {
+  if (chain.family !== "mock" && !chain.defaultRpcUrl) {
     throw new RuleError("That chain needs a public RPC URL before ownership rules can use it.");
   }
   const existingRoleSettings = await env.DB.prepare(
@@ -973,7 +973,7 @@ export async function syncMemberRoles(
         env.DB.prepare("SELECT chain, address FROM wallets WHERE discord_user_id = ?")
           .bind(discordUserId)
           .all<WalletRow>(),
-        listChains(env)
+        listChains(env, { includeDemo: true })
       ])
     : [{ results: [] as WalletRow[] }, []];
   const currentRoles = await currentRolesPromise;
@@ -989,6 +989,13 @@ export async function syncMemberRoles(
   const outcomes = await Promise.all(
     rules.map(async (rule) => {
       const chain = chainById.get(rule.chainId);
+      if (chain?.family === "mock") {
+        return {
+          rule,
+          qualifies: evmWallets.length > 0,
+          balance: evmWallets.length > 0 ? "1" : "0"
+        };
+      }
       const rpcUrl = chain?.defaultRpcUrl;
       if (!rpcUrl || !chain) {
         return { rule, error: "No RPC URL is configured for this chain." };

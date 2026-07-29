@@ -86,7 +86,7 @@ export const BUILTIN_CHAINS: readonly ChainDefinition[] = [
   {
     id: "mock",
     family: "mock",
-    name: "Local Demo Chain",
+    name: "Demo Chain (testing)",
     chainReference: "local",
     nativeCurrencySymbol: "TEST",
     builtin: true

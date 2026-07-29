@@ -91,13 +91,18 @@ export function parseCustomChain(input: CustomChainInput): ParseResult {
   };
 }
 
-export async function listChains(env: Env): Promise<ChainDefinition[]> {
+export async function listChains(env: Env, options?: { includeDemo?: boolean }): Promise<ChainDefinition[]> {
   const custom = await env.DB.prepare(
     "SELECT id, family, name, chain_reference, native_currency_symbol, rpc_url, explorer_url FROM chain_configs WHERE enabled = 1 ORDER BY name"
   ).all<CustomChainRow>();
 
   return [
-    ...BUILTIN_CHAINS.filter((chain) => chain.family === "evm" || chain.family === "solana"),
+    ...BUILTIN_CHAINS.filter(
+      (chain) =>
+        chain.family === "evm" ||
+        chain.family === "solana" ||
+        (options?.includeDemo === true && chain.family === "mock")
+    ),
     ...custom.results.filter((row) => row.family === "evm").map((row) => ({
       id: row.id,
       family: row.family,
