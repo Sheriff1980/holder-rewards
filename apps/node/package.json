@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@holder-rewards/worker": "workspace:*",
-    "better-sqlite3": "^12.0.0"
+    "better-sqlite3": "^13.0.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260729.1",
