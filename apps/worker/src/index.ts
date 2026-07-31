@@ -11,11 +11,24 @@ import {
   removeIndexerConfig,
   saveIndexerConfig
 } from "./indexers.js";
-import { createQuest, listPendingSubmissions, listQuests, QuestError, removeQuest, reviewQuestSubmission } from "./quests.js";
+import {
+  checkQuest,
+  createQuest,
+  listPendingSubmissions,
+  listQuests,
+  listQuestsWithStatus,
+  QuestError,
+  removeQuest,
+  reviewQuestSubmission,
+  submitQuestCode,
+  submitQuestProof
+} from "./quests.js";
 import {
   cancelRaffle,
   createRaffle,
   drawRaffle,
+  enterRaffle,
+  listRaffleEntriesForMember,
   listRaffles,
   RaffleError
 } from "./raffles.js";
@@ -23,6 +36,7 @@ import {
   createStoreItem,
   listRecentPurchases,
   listStoreItems,
+  purchaseStoreItem,
   removeStoreItem,
   StoreError
 } from "./store.js";
@@ -33,7 +47,7 @@ import {
   removeSalesWatch,
   SalesWatchError
 } from "./sales.js";
-import { managerPage, setupPage, verifyPage } from "./html.js";
+import { managerPage, memberRewardsPage, setupPage, verifyPage } from "./html.js";
 import type { DiscordInteraction, Env, RoleSyncQueueMessage } from "./types.js";
 import { AdminError, listManageableDiscordRoles, requireAdminSession } from "./admin.js";
 import {
@@ -56,7 +70,7 @@ import {
 } from "./rules.js";
 import { processRoleSyncQueue, retryFailedRoleSyncs, runScheduledRoleSync } from "./scheduler.js";
 import { pollSalesWatches } from "./sales.js";
-import { getRewardSettings, RewardSettingsError, updateRewardSettings } from "./points.js";
+import { getPointsBalance, getRewardSettings, RewardSettingsError, updateRewardSettings } from "./points.js";
 import {
   AssetError,
   brandLogoUrl,
@@ -77,6 +91,7 @@ import { buildGuildExport, type ExportKind } from "./exports.js";
 import { getWalletPrivacySettings, updateWalletPrivacySettings } from "./privacy.js";
 import { checkChainProviders } from "./health.js";
 import { checkLaunchReadiness } from "./readiness.js";
+import { MemberSessionError, requireMemberSession } from "./member.js";
 
 const securityHeaders = {
   "Content-Security-Policy":
@@ -99,6 +114,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   return Response.json(body, {
     status,
     headers: securityHeaders
+  });
+}
+
+function privateJsonResponse(body: unknown, status = 200): Response {
+  return Response.json(body, {
+    status,
+    headers: { ...securityHeaders, "Cache-Control": "private, no-store" }
   });
 }
 
@@ -136,6 +158,80 @@ function hasSetupAccess(request: Request, env: Env): boolean {
 function bearerToken(request: Request): string {
   const authorization = request.headers.get("Authorization");
   return authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+}
+
+async function memberApiResponse(request: Request, env: Env, path: string): Promise<Response> {
+  try {
+    const session = await requireMemberSession(env, bearerToken(request));
+
+    if (request.method === "GET" && path === "session") {
+      const [branding, rewards, balance, quests, raffles, entries, storeItems] = await Promise.all([
+        getGuildBranding(env, session.guild_id),
+        getRewardSettings(env, session.guild_id),
+        getPointsBalance(env, session.guild_id, session.discord_user_id),
+        listQuestsWithStatus(env, session.guild_id, session.discord_user_id),
+        listRaffles(env, session.guild_id),
+        listRaffleEntriesForMember(env, session.guild_id, session.discord_user_id),
+        listStoreItems(env, session.guild_id)
+      ]);
+      return privateJsonResponse({
+        guildId: session.guild_id,
+        branding,
+        rewards,
+        balance,
+        quests,
+        raffles: raffles
+          .filter((raffle) => raffle.status === "open")
+          .map((raffle) => ({ ...raffle, memberEntries: entries.get(raffle.id) ?? 0 })),
+        storeItems
+      });
+    }
+
+    if (request.method === "POST" && path.startsWith("quests/") && path.endsWith("/check")) {
+      const questId = path.slice("quests/".length, -"/check".length);
+      return privateJsonResponse(await checkQuest(env, session.guild_id, questId, session.discord_user_id));
+    }
+
+    if (request.method === "POST" && path === "quests/code") {
+      const input = (await request.json()) as Record<string, unknown>;
+      return privateJsonResponse(await submitQuestCode(env, session.guild_id, session.discord_user_id, input.code));
+    }
+
+    if (request.method === "POST" && path.startsWith("quests/") && path.endsWith("/proof")) {
+      const questId = path.slice("quests/".length, -"/proof".length);
+      const input = (await request.json()) as Record<string, unknown>;
+      return privateJsonResponse(await submitQuestProof(env, session.guild_id, questId, session.discord_user_id, input.proof));
+    }
+
+    if (request.method === "POST" && path.startsWith("raffles/") && path.endsWith("/enter")) {
+      const raffleId = path.slice("raffles/".length, -"/enter".length);
+      const input = (await request.json()) as Record<string, unknown>;
+      return privateJsonResponse(await enterRaffle(env, {
+        guildId: session.guild_id,
+        raffleId,
+        discordUserId: session.discord_user_id,
+        count: input.count
+      }));
+    }
+
+    if (request.method === "POST" && path.startsWith("store/") && path.endsWith("/buy")) {
+      const itemId = path.slice("store/".length, -"/buy".length);
+      return privateJsonResponse(await purchaseStoreItem(env, {
+        guildId: session.guild_id,
+        itemId,
+        discordUserId: session.discord_user_id
+      }));
+    }
+  } catch (error) {
+    if (error instanceof MemberSessionError) return privateJsonResponse({ error: error.message }, error.status);
+    if (error instanceof QuestError || error instanceof RaffleError || error instanceof StoreError) {
+      return privateJsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof SyntaxError) return privateJsonResponse({ error: "Request body must be valid JSON." }, 400);
+    console.error("Member rewards request failed", { method: request.method, path, error });
+    return privateJsonResponse({ error: "Community rewards are temporarily unavailable." }, 503);
+  }
+  return privateJsonResponse({ error: "Not found" }, 404);
 }
 
 async function healthResponse(env: Env): Promise<Response> {
@@ -906,6 +1002,10 @@ export async function handleRequest(
     return htmlResponse(verifyPage(env, request.url));
   }
 
+  if (request.method === "GET" && url.pathname === "/rewards") {
+    return htmlResponse(memberRewardsPage(env));
+  }
+
   if (request.method === "GET" && url.pathname === "/manage") {
     return htmlResponse(managerPage(env));
   }
@@ -936,6 +1036,10 @@ export async function handleRequest(
 
   if (url.pathname.startsWith("/api/admin/")) {
     return managerApiResponse(request, env, url.pathname.slice("/api/admin/".length));
+  }
+
+  if (url.pathname.startsWith("/api/member/")) {
+    return memberApiResponse(request, env, url.pathname.slice("/api/member/".length));
   }
 
   return jsonResponse({ error: "Not found" }, 404);

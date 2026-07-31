@@ -8,6 +8,7 @@ import type { Env } from "@holder-rewards/worker/types";
 import { createNodeD1 } from "../src/db.js";
 import { applyMigrations } from "../src/migrate.js";
 import { buildPublicRequestUrl, normalizePublicAppUrl } from "../src/env.js";
+import { createMemberSession } from "../../worker/src/member.js";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../../../migrations", import.meta.url));
 
@@ -75,14 +76,14 @@ describe("migrations", () => {
   it("applies the full set once and reports zero on the second run", () => {
     const db = createNodeD1(":memory:");
     const applied = applyMigrations(db.sqlite, MIGRATIONS_DIR);
-    expect(applied).toBeGreaterThanOrEqual(27);
+    expect(applied).toBeGreaterThanOrEqual(28);
     expect(applyMigrations(db.sqlite, MIGRATIONS_DIR)).toBe(0);
 
     const tables = db.sqlite
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all() as Array<{ name: string }>;
     const names = new Set(tables.map((row) => row.name));
-    for (const required of ["role_rules", "point_transactions", "quests", "raffles", "store_items", "sales_watches", "indexer_configs"]) {
+    for (const required of ["role_rules", "point_transactions", "quests", "raffles", "store_items", "sales_watches", "indexer_configs", "member_sessions"]) {
       expect(names.has(required)).toBe(true);
     }
     const settingsColumns = db.sqlite.prepare("PRAGMA table_info(guild_settings)").all() as Array<{ name: string }>;
@@ -113,6 +114,28 @@ describe("worker over the Node host", () => {
   it("serves health checks from the same handler", async () => {
     const response = await worker.fetch(new Request("http://localhost/health"), nodeEnv(), context);
     expect(response.status).toBe(200);
+  });
+
+  it("opens a private member rewards session over SQLite", async () => {
+    const env = nodeEnv();
+    const token = await createMemberSession(env, "223456789012345678", "123456789012345678");
+    const response = await worker.fetch(
+      new Request("http://localhost/api/member/session", {
+        headers: { Authorization: `Bearer ${token}` }
+      }),
+      env,
+      context
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      guildId: "123456789012345678",
+      balance: 0,
+      quests: [],
+      raffles: [],
+      storeItems: []
+    });
   });
 
   it("runs the scheduled maintenance job over the SQLite adapter", async () => {

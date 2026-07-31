@@ -143,6 +143,25 @@ describe("Cloudflare Worker", () => {
     expect(html).not.toContain(payload);
   });
 
+  it("serves the private member rewards page without embedding URL data", async () => {
+    const payload = "<script>alert('xss')</script>";
+    const response = await handleRequest(
+      new Request(`https://example.com/rewards?token=${encodeURIComponent(payload)}&view=store`),
+      createEnv()
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).not.toContain(payload);
+    expect(html).toContain("Community rewards");
+    expect(html).toContain("Quests");
+    expect(html).toContain("Store");
+    expect(html).toContain("Raffles");
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const script of scripts) expect(() => new Function(script[1])).not.toThrow();
+  });
+
   it("rejects manager API requests without a private Discord session", async () => {
     const response = await handleRequest(
       new Request("https://example.com/api/admin/session"),
@@ -279,6 +298,31 @@ describe("Cloudflare Worker", () => {
     expect(button).not.toHaveProperty("url");
   });
 
+  it("posts a permanent rewards panel with member action buttons", async () => {
+    const response = await handleDiscordInteraction(
+      {
+        id: "123456789012345689",
+        type: 2,
+        guild_id: "123456789012345678",
+        member: { permissions: String(1n << 5n), user: { id: "223456789012345678" } },
+        data: { name: "points", options: [{ name: "panel", type: 1 }] }
+      },
+      new URL("https://example.com/interactions"),
+      createEnv()
+    );
+    const body = (await response.json()) as {
+      data: { components: Array<{ components: Array<{ label: string; custom_id: string }> }> };
+    };
+
+    expect(body.data.components[0]?.components).toEqual([
+      expect.objectContaining({ label: "Claim Daily", custom_id: "rewards:claim" }),
+      expect.objectContaining({ label: "My Balance", custom_id: "rewards:balance" }),
+      expect.objectContaining({ label: "Quests", custom_id: "rewards:open:quests" }),
+      expect.objectContaining({ label: "Store", custom_id: "rewards:open:store" }),
+      expect.objectContaining({ label: "Raffles", custom_id: "rewards:open:raffles" })
+    ]);
+  });
+
   it("registers manager commands for NFT and token role rules", () => {
     expect(discordCommands.map((command) => command.name)).toEqual(["verify", "points", "tip", "quests", "raffle", "store", "rules"]);
     for (const command of discordCommands) {
@@ -287,6 +331,7 @@ describe("Cloudflare Worker", () => {
     }
     const points = discordCommands.find((command) => command.name === "points");
     expect(points?.options.map((option) => option.name)).toEqual([
+      "panel",
       "claim",
       "balance",
       "leaderboard",

@@ -22,6 +22,7 @@ import {
 } from "./points.js";
 import { brandLogoUrl, currencyIconUrl, hasBrandLogo, hasCurrencyIcon } from "./assets.js";
 import { accentColorNumber, getGuildBranding } from "./branding.js";
+import { createMemberSession } from "./member.js";
 import { checkQuest, listQuests, listQuestsWithStatus, QuestError, submitQuestCode, submitQuestProof } from "./quests.js";
 import { enterRaffle, listRaffleEntriesForMember, listRaffles, RaffleError } from "./raffles.js";
 import { listStoreItems, purchaseStoreItem, StoreError } from "./store.js";
@@ -49,6 +50,7 @@ export const discordCommands = [
     integration_types: [0],
     contexts: [0],
     options: [
+      { name: "panel", description: "Post the community rewards panel in this channel.", type: 1 },
       { name: "claim", description: "Collect your daily points.", type: 1 },
       { name: "balance", description: "Check your current points balance.", type: 1 },
       { name: "leaderboard", description: "Show the server points leaderboard.", type: 1 },
@@ -430,6 +432,33 @@ function canManageGuild(interaction: DiscordInteraction): boolean {
   return (permissions & MANAGE_GUILD) !== 0n || (permissions & ADMINISTRATOR) !== 0n;
 }
 
+async function claimRewardResponse(
+  env: Env,
+  requestUrl: URL,
+  guildId: string,
+  discordUserId: string
+): Promise<Response> {
+  const iconUrl = (await hasCurrencyIcon(env, guildId))
+    ? currencyIconUrl(requestUrl.origin, guildId)
+    : null;
+  const roleSync = await syncMemberRoles(env, guildId, discordUserId);
+  if (roleSync.qualified.length === 0) {
+    return ephemeralRewardMessage(
+      roleSync.errors.length > 0
+        ? "Your holder status could not be confirmed right now. No claim was used; please try again shortly."
+        : "Link a qualifying wallet and receive a holder role before collecting the daily reward.",
+      iconUrl
+    );
+  }
+  const claim = await claimDailyPoints(env, guildId, discordUserId);
+  return ephemeralRewardMessage(
+    claim.claimed
+      ? `You collected ${claim.amount.toLocaleString()} ${claim.currencyName}. Balance: ${claim.balance.toLocaleString()}.`
+      : `You already collected today's ${claim.currencyName}. Balance: ${claim.balance.toLocaleString()}.`,
+    iconUrl
+  );
+}
+
 function commandValue(interaction: DiscordInteraction, name: string): string | number | boolean | undefined {
   return interaction.data?.options?.[0]?.options?.find((option) => option.name === name)?.value;
 }
@@ -545,6 +574,77 @@ export async function handleDiscordInteraction(
         ]
       }
     });
+  }
+
+  if (interaction.type === 3 && interaction.data?.custom_id === "rewards:claim") {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Rewards are available inside a Discord server.");
+    }
+    try {
+      return await claimRewardResponse(env, requestUrl, interaction.guild_id, discordUserId);
+    } catch {
+      return ephemeralMessage(`${env.REWARD_CURRENCY_NAME} are temporarily unavailable. Please try again shortly.`);
+    }
+  }
+
+  if (interaction.type === 3 && interaction.data?.custom_id === "rewards:balance") {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Rewards are available inside a Discord server.");
+    }
+    try {
+      const [balance, settings, iconAvailable] = await Promise.all([
+        getPointsBalance(env, interaction.guild_id, discordUserId),
+        getRewardSettings(env, interaction.guild_id),
+        hasCurrencyIcon(env, interaction.guild_id)
+      ]);
+      return ephemeralRewardMessage(
+        `Your ${settings.currencyName} balance is ${balance.toLocaleString()}.`,
+        iconAvailable ? currencyIconUrl(requestUrl.origin, interaction.guild_id) : null
+      );
+    } catch {
+      return ephemeralMessage(`${env.REWARD_CURRENCY_NAME} are temporarily unavailable. Please try again shortly.`);
+    }
+  }
+
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("rewards:open:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Rewards are available inside a Discord server.");
+    }
+    const view = interaction.data.custom_id.slice("rewards:open:".length);
+    if (!new Set(["quests", "store", "raffles"]).has(view)) {
+      return ephemeralMessage("That rewards section is not available.");
+    }
+    try {
+      const available = view === "quests"
+        ? (await listQuests(env, interaction.guild_id)).length > 0
+        : view === "store"
+          ? (await listStoreItems(env, interaction.guild_id)).length > 0
+          : (await listRaffles(env, interaction.guild_id)).some((raffle) => raffle.status === "open");
+      if (!available) {
+        const label = view === "quests" ? "quests" : view === "store" ? "store items" : "open raffles";
+        return ephemeralMessage(`There are no ${label} available right now.`);
+      }
+      const token = await createMemberSession(env, discordUserId, interaction.guild_id);
+      const memberUrl = new URL("/rewards", requestUrl.origin);
+      memberUrl.searchParams.set("token", token);
+      memberUrl.searchParams.set("view", view);
+      return Response.json({
+        type: 4,
+        data: {
+          content: `Your private ${view} page is ready.`,
+          flags: EPHEMERAL,
+          components: [{
+            type: 1,
+            components: [{ type: 2, style: 5, label: `Open ${view[0]!.toUpperCase()}${view.slice(1)}`, url: memberUrl.toString() }]
+          }]
+        }
+      });
+    } catch {
+      return ephemeralMessage("Your rewards page is temporarily unavailable. Please try again shortly.");
+    }
   }
 
   if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("quest:check:")) {
@@ -736,6 +836,36 @@ export async function handleDiscordInteraction(
       const iconUrl = (await hasCurrencyIcon(env, interaction.guild_id))
         ? currencyIconUrl(requestUrl.origin, interaction.guild_id)
         : null;
+      if (subcommand === "panel") {
+        if (!canManageGuild(interaction)) {
+          return ephemeralMessage("You need the Manage Server permission to post a rewards panel.");
+        }
+        const [branding, settings] = await Promise.all([
+          getGuildBranding(env, interaction.guild_id),
+          getRewardSettings(env, interaction.guild_id)
+        ]);
+        return Response.json({
+          type: 4,
+          data: {
+            embeds: [{
+              title: `${branding.name} Rewards`,
+              description: `Claim your daily ${settings.currencyName}, check your balance, and explore community rewards.`,
+              color: accentColorNumber(branding.accentColor),
+              ...(iconUrl ? { thumbnail: { url: iconUrl } } : {})
+            }],
+            components: [{
+              type: 1,
+              components: [
+                { type: 2, style: 1, label: "Claim Daily", custom_id: "rewards:claim" },
+                { type: 2, style: 2, label: "My Balance", custom_id: "rewards:balance" },
+                { type: 2, style: 2, label: "Quests", custom_id: "rewards:open:quests" },
+                { type: 2, style: 2, label: "Store", custom_id: "rewards:open:store" },
+                { type: 2, style: 2, label: "Raffles", custom_id: "rewards:open:raffles" }
+              ]
+            }]
+          }
+        });
+      }
       if (subcommand === "grant") {
         if (!canManageGuild(interaction)) {
           return ephemeralMessage("You need the Manage Server permission to reward points.");
@@ -757,22 +887,7 @@ export async function handleDiscordInteraction(
         );
       }
       if (subcommand === "claim") {
-        const roleSync = await syncMemberRoles(env, interaction.guild_id, discordUserId);
-        if (roleSync.qualified.length === 0) {
-          return ephemeralRewardMessage(
-            roleSync.errors.length > 0
-              ? "Your holder status could not be confirmed right now. No claim was used; please try again shortly."
-              : "Link a qualifying wallet and receive a holder role before collecting the daily reward.",
-            iconUrl
-          );
-        }
-        const claim = await claimDailyPoints(env, interaction.guild_id, discordUserId);
-        return ephemeralRewardMessage(
-          claim.claimed
-            ? `You collected ${claim.amount.toLocaleString()} ${claim.currencyName}. Balance: ${claim.balance.toLocaleString()}.`
-            : `You already collected today's ${claim.currencyName}. Balance: ${claim.balance.toLocaleString()}.`,
-          iconUrl
-        );
+        return claimRewardResponse(env, requestUrl, interaction.guild_id, discordUserId);
       }
       if (subcommand === "balance") {
         const [balance, settings] = await Promise.all([
