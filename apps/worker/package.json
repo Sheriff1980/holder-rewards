@@ -16,7 +16,7 @@
     }
   },
   "scripts": {
-    "build": "wrangler deploy --dry-run --outdir dist --config ../../wrangler.jsonc && tsc -p tsconfig.build.json",
+    "build": "pnpm --filter @holder-rewards/chains build && wrangler deploy --dry-run --outdir dist --config ../../wrangler.jsonc && tsc -p tsconfig.build.json",
     "dev": "pnpm --filter @holder-rewards/chains build && wrangler dev --config ../../wrangler.jsonc",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm --filter @holder-rewards/chains build && vitest run",
