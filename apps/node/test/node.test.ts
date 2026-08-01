@@ -76,7 +76,7 @@ describe("migrations", () => {
   it("applies the full set once and reports zero on the second run", () => {
     const db = createNodeD1(":memory:");
     const applied = applyMigrations(db.sqlite, MIGRATIONS_DIR);
-    expect(applied).toBeGreaterThanOrEqual(30);
+    expect(applied).toBeGreaterThanOrEqual(31);
     expect(applyMigrations(db.sqlite, MIGRATIONS_DIR)).toBe(0);
 
     const tables = db.sqlite
@@ -94,6 +94,13 @@ describe("migrations", () => {
     expect(storeColumns.some((column) => column.name === "purchase_limit_per_member")).toBe(true);
     const channelColumns = db.sqlite.prepare("PRAGMA table_info(guild_settings)").all() as Array<{ name: string }>;
     expect(channelColumns.some((column) => column.name === "rewards_channel_id")).toBe(true);
+
+    db.sqlite.prepare(
+      "INSERT INTO quests (id, guild_id, title, kind, config, reward) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("custom-quest", "123456789012345678", "Share your proof", "custom", '{"instructions":"Post a link"}', 25);
+    expect(
+      db.sqlite.prepare("SELECT kind FROM quests WHERE id = ?").get("custom-quest")
+    ).toEqual({ kind: "custom" });
   });
 });
 
