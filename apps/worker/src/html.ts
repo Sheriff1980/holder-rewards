@@ -2311,11 +2311,9 @@ export function memberRewardsPage(env: Env): string {
           button.type = "button";
           button.textContent = item.stock === 0 ? "Sold out" : atMemberLimit ? "Limit reached" : "Buy";
           button.disabled = item.stock === 0 || atMemberLimit;
-          button.addEventListener("click", () => {
-            if (confirm("Buy " + item.title + " for " + item.price.toLocaleString() + " " + data.rewards.currencyName + "?")) {
-              runAction(button, "store/" + encodeURIComponent(item.id) + "/buy", {}, "Purchase complete.");
-            }
-          });
+          button.addEventListener("click", () =>
+            runAction(button, "store/" + encodeURIComponent(item.id) + "/buy", {}, "Purchase complete.")
+          );
           actions.append(button);
           list.append(row);
         }
@@ -2339,10 +2337,7 @@ export function memberRewardsPage(env: Env): string {
           button.disabled = raffle.memberEntries >= raffle.maxEntriesPerMember;
           button.addEventListener("click", () => {
             const count = Number(input.value);
-            const cost = count * raffle.entryCost;
-            if (confirm("Spend " + cost.toLocaleString() + " " + data.rewards.currencyName + " on " + count + " raffle entr" + (count === 1 ? "y" : "ies") + "?")) {
-              runAction(button, "raffles/" + encodeURIComponent(raffle.id) + "/enter", { count }, "Raffle entry added.");
-            }
+            runAction(button, "raffles/" + encodeURIComponent(raffle.id) + "/enter", { count }, "Raffle entry added.");
           });
           actions.append(input, button);
           list.append(row);
