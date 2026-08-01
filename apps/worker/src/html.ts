@@ -594,6 +594,10 @@ export function managerPage(env: Env): string {
                 <label for="store-stock">Stock</label>
                 <input id="store-stock" type="number" min="1" max="10000" step="1" placeholder="Blank for unlimited">
               </div>
+              <div>
+                <label for="store-purchase-limit">Maximum purchases per member</label>
+                <input id="store-purchase-limit" type="number" min="1" max="10000" step="1" placeholder="Blank for unlimited">
+              </div>
             </div>
             <label for="store-description">Description</label>
             <input id="store-description" maxlength="200" placeholder="What the buyer gets">
@@ -1826,7 +1830,10 @@ export function managerPage(env: Env): string {
           const detail = document.createElement("span");
           detail.className = "muted";
           const stock = item.stock === null ? "unlimited stock" : item.stock + " left";
-          detail.textContent = stock + " - " + item.sold.toLocaleString() + " sold - id " + item.id.slice(0, 8) + (item.description ? " - " + item.description : "");
+          const memberLimit = item.purchaseLimitPerMember === null
+            ? "unlimited per member"
+            : "maximum " + item.purchaseLimitPerMember.toLocaleString() + " per member";
+          detail.textContent = stock + " - " + memberLimit + " - " + item.sold.toLocaleString() + " sold - id " + item.id.slice(0, 8) + (item.description ? " - " + item.description : "");
           copy.append(description, detail);
           const remove = document.createElement("button");
           remove.type = "button";
@@ -1877,7 +1884,8 @@ export function managerPage(env: Env): string {
               description: document.getElementById("store-description").value.trim() || undefined,
               price: document.getElementById("store-price").value,
               roleId: storeRole.value || undefined,
-              stock: document.getElementById("store-stock").value || undefined
+              stock: document.getElementById("store-stock").value || undefined,
+              purchaseLimitPerMember: document.getElementById("store-purchase-limit").value || undefined
             })
           });
           data.storeItems = (data.storeItems || []).concat(saved.item);
@@ -2174,11 +2182,15 @@ export function memberRewardsPage(env: Env): string {
         if (!data.storeItems.length) return list.append(emptyRow("There are no store items available right now."));
         for (const item of data.storeItems) {
           const stock = item.stock === null ? "Unlimited" : item.stock.toLocaleString() + " remaining";
-          const { row, actions } = actionRow(item.title, item.description + (item.description ? " - " : "") + item.price.toLocaleString() + " " + data.rewards.currencyName + " - " + stock);
+          const memberLimit = item.purchaseLimitPerMember === null
+            ? "No per-member limit"
+            : "You bought " + item.memberPurchases.toLocaleString() + " of " + item.purchaseLimitPerMember.toLocaleString();
+          const atMemberLimit = item.purchaseLimitPerMember !== null && item.memberPurchases >= item.purchaseLimitPerMember;
+          const { row, actions } = actionRow(item.title, item.description + (item.description ? " - " : "") + item.price.toLocaleString() + " " + data.rewards.currencyName + " - " + stock + " - " + memberLimit);
           const button = document.createElement("button");
           button.type = "button";
-          button.textContent = item.stock === 0 ? "Sold out" : "Buy";
-          button.disabled = item.stock === 0;
+          button.textContent = item.stock === 0 ? "Sold out" : atMemberLimit ? "Limit reached" : "Buy";
+          button.disabled = item.stock === 0 || atMemberLimit;
           button.addEventListener("click", () => {
             if (confirm("Buy " + item.title + " for " + item.price.toLocaleString() + " " + data.rewards.currencyName + "?")) {
               runAction(button, "store/" + encodeURIComponent(item.id) + "/buy", {}, "Purchase complete.");

@@ -22,6 +22,7 @@ type ItemRow = {
   price: number;
   role_id: string | null;
   stock: number | null;
+  purchase_limit_per_member: number | null;
   enabled: number;
 };
 
@@ -46,6 +47,17 @@ class StoreStatement {
       return { success: true, results, meta: {} } as unknown as D1Result<T>;
     }
     if (this.sql.includes("FROM store_purchases")) {
+      if (this.sql.includes("GROUP BY item_id")) {
+        const counts = new Map<string, number>();
+        for (const purchase of this.db.purchases.filter(
+          (row) => row.guild_id === this.values[0] && row.discord_user_id === this.values[1]
+        )) counts.set(purchase.item_id, (counts.get(purchase.item_id) ?? 0) + 1);
+        return {
+          success: true,
+          results: [...counts].map(([item_id, purchases]) => ({ item_id, purchases })),
+          meta: {}
+        } as unknown as D1Result<T>;
+      }
       const results = this.db.purchases
         .filter((purchase) => purchase.guild_id === this.values[0])
         .map((purchase) => ({
@@ -62,6 +74,12 @@ class StoreStatement {
 
   async first<T>(): Promise<T | null> {
     if (this.sql.includes("FROM guild_settings")) return null;
+    if (this.sql.includes("COUNT(*) AS purchases FROM store_purchases")) {
+      const purchases = this.db.purchases.filter(
+        (row) => row.item_id === this.values[0] && row.discord_user_id === this.values[1]
+      ).length;
+      return { purchases } as T;
+    }
     const balance = this.db.transactions
       .filter((entry) => entry.guild_id === this.values[0] && entry.discord_user_id === this.values[1])
       .reduce((sum, entry) => sum + entry.amount, 0);
@@ -78,6 +96,7 @@ class StoreStatement {
         price: Number(this.values[4]),
         role_id: this.values[5] === null ? null : String(this.values[5]),
         stock: this.values[6] === null ? null : Number(this.values[6]),
+        purchase_limit_per_member: this.values[7] === null ? null : Number(this.values[7]),
         enabled: 1
       });
       return { success: true, meta: { changes: 1 } } as D1Result;
@@ -202,6 +221,28 @@ describe("store purchases", () => {
     ).rejects.toThrow("sold out");
   });
 
+  it("enforces a separate purchase limit for each member", async () => {
+    const db = new StoreDb();
+    const env = createEnv(db);
+    const item = await createStoreItem(env, {
+      guildId: GUILD,
+      title: "Limited reward",
+      price: 10,
+      stock: 10,
+      purchaseLimitPerMember: 1
+    });
+    await grantPoints(env, { guildId: GUILD, discordUserId: "user-1", amount: 20, grantedBy: "m" });
+    await grantPoints(env, { guildId: GUILD, discordUserId: "user-2", amount: 20, grantedBy: "m" });
+
+    await purchaseStoreItem(env, { guildId: GUILD, itemId: item.id, discordUserId: "user-1" });
+    await expect(
+      purchaseStoreItem(env, { guildId: GUILD, itemId: item.id, discordUserId: "user-1" })
+    ).rejects.toThrow("maximum of 1");
+    await expect(
+      purchaseStoreItem(env, { guildId: GUILD, itemId: item.id, discordUserId: "user-2" })
+    ).resolves.toMatchObject({ balance: 10 });
+  });
+
   it("grants role items and refunds the charge when Discord rejects the role", async () => {
     const db = new StoreDb();
     const env = createEnv(db);
@@ -236,6 +277,9 @@ describe("store purchases", () => {
     ).rejects.toBeInstanceOf(StoreError);
     await expect(
       createStoreItem(env, { guildId: GUILD, title: "Bad stock", price: 100, stock: 0 })
+    ).rejects.toBeInstanceOf(StoreError);
+    await expect(
+      createStoreItem(env, { guildId: GUILD, title: "Bad limit", price: 100, purchaseLimitPerMember: 0 })
     ).rejects.toBeInstanceOf(StoreError);
 
     const item = await createStoreItem(env, { guildId: GUILD, title: "Gone", price: 10 });

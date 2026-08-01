@@ -36,6 +36,7 @@ import {
   createStoreItem,
   listRecentPurchases,
   listStoreItems,
+  listStorePurchaseCountsForMember,
   purchaseStoreItem,
   removeStoreItem,
   StoreError
@@ -165,14 +166,15 @@ async function memberApiResponse(request: Request, env: Env, path: string): Prom
     const session = await requireMemberSession(env, bearerToken(request));
 
     if (request.method === "GET" && path === "session") {
-      const [branding, rewards, balance, quests, raffles, entries, storeItems] = await Promise.all([
+      const [branding, rewards, balance, quests, raffles, entries, storeItems, storePurchases] = await Promise.all([
         getGuildBranding(env, session.guild_id),
         getRewardSettings(env, session.guild_id),
         getPointsBalance(env, session.guild_id, session.discord_user_id),
         listQuestsWithStatus(env, session.guild_id, session.discord_user_id),
         listRaffles(env, session.guild_id),
         listRaffleEntriesForMember(env, session.guild_id, session.discord_user_id),
-        listStoreItems(env, session.guild_id)
+        listStoreItems(env, session.guild_id),
+        listStorePurchaseCountsForMember(env, session.guild_id, session.discord_user_id)
       ]);
       return privateJsonResponse({
         guildId: session.guild_id,
@@ -183,7 +185,10 @@ async function memberApiResponse(request: Request, env: Env, path: string): Prom
         raffles: raffles
           .filter((raffle) => raffle.status === "open")
           .map((raffle) => ({ ...raffle, memberEntries: entries.get(raffle.id) ?? 0 })),
-        storeItems
+        storeItems: storeItems.map((item) => ({
+          ...item,
+          memberPurchases: storePurchases.get(item.id) ?? 0
+        }))
       });
     }
 
@@ -850,7 +855,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         description: input.description,
         price: input.price,
         roleId: input.roleId,
-        stock: input.stock
+        stock: input.stock,
+        purchaseLimitPerMember: input.purchaseLimitPerMember
       });
       await recordAuditEvent(env, {
         guildId: session.guild_id,
