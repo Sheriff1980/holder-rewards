@@ -497,6 +497,14 @@ export function managerPage(env: Env): string {
           <div id="rule-list" class="rule-list"></div>
         </section>
         <section class="panel">
+          <h2>Quest channel</h2>
+          <p class="muted">The bot posts a permanent Quest panel here and announces new quests automatically.</p>
+          <label for="quest-channel">Discord channel</label>
+          <select id="quest-channel"></select>
+          <div class="form-actions"><button id="save-quest-channel" type="button">Save and publish panel</button></div>
+          <div id="quest-channel-result" aria-live="polite"></div>
+        </section>
+        <section class="panel">
           <h2>Quests</h2>
           <form id="quest-form">
             <div class="field-grid">
@@ -749,6 +757,9 @@ export function managerPage(env: Env): string {
       const questList = document.getElementById("quest-list");
       const submissionArea = document.getElementById("submission-area");
       const submissionList = document.getElementById("submission-list");
+      const questChannel = document.getElementById("quest-channel");
+      const saveQuestChannel = document.getElementById("save-quest-channel");
+      const questChannelResult = document.getElementById("quest-channel-result");
       const rewardsChannel = document.getElementById("rewards-channel");
       const saveRewardsChannel = document.getElementById("save-rewards-channel");
       const rewardsChannelResult = document.getElementById("rewards-channel-result");
@@ -1555,6 +1566,48 @@ export function managerPage(env: Env): string {
         document.getElementById("quest-instructions").required = kind === "custom";
       }
 
+      function setQuestChannelOptions() {
+        questChannel.replaceChildren();
+        const prompt = document.createElement("option");
+        prompt.value = "";
+        prompt.textContent = data.channels && data.channels.length
+          ? "Choose a channel"
+          : "No text channels available";
+        questChannel.append(prompt);
+        for (const channel of data.channels || []) {
+          const option = document.createElement("option");
+          option.value = channel.id;
+          option.textContent = "#" + channel.name;
+          questChannel.append(option);
+        }
+        questChannel.value = data.questChannel?.channelId || "";
+      }
+
+      saveQuestChannel.addEventListener("click", async () => {
+        if (!questChannel.value) {
+          questChannelResult.className = "error";
+          questChannelResult.textContent = "Choose a Discord channel.";
+          return;
+        }
+        saveQuestChannel.disabled = true;
+        questChannelResult.className = "";
+        questChannelResult.textContent = "Publishing the Quest panel...";
+        try {
+          const saved = await api("quest-channel", {
+            method: "POST",
+            body: JSON.stringify({ channelId: questChannel.value })
+          });
+          data.questChannel = saved.questChannel;
+          questChannelResult.className = "success";
+          questChannelResult.textContent = "Panel published. New quests will be announced automatically.";
+        } catch (error) {
+          questChannelResult.className = "error";
+          questChannelResult.textContent = error instanceof Error ? error.message : "The Quest panel could not be published.";
+        } finally {
+          saveQuestChannel.disabled = false;
+        }
+      });
+
       function questSummary(quest) {
         if (quest.kind === "link_wallet") return "Link a wallet";
         if (quest.kind === "hold_role") {
@@ -1616,7 +1669,11 @@ export function managerPage(env: Env): string {
           questForm.reset();
           updateQuestFields();
           questResult.className = "success";
-          questResult.textContent = "Quest added. Members can see it with /quests.";
+          questResult.textContent = saved.announcementWarning
+            ? "Quest added, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Quest added and announced in the Quest channel."
+              : "Quest added. Choose a Quest channel to announce future quests.";
         } catch (error) {
           questResult.className = "error";
           questResult.textContent = error instanceof Error ? error.message : "Quest could not be added.";
@@ -2058,6 +2115,7 @@ export function managerPage(env: Env): string {
         setOptions(chainInput, data.chains);
         setOptions(indexerChain, data.chains.filter((chain) => chain.family !== "mock"));
         setOptions(questRole, data.roles);
+        setQuestChannelOptions();
         renderIndexerForm();
         updateQuestFields();
         renderQuests();

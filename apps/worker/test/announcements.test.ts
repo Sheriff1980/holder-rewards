@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { configureRewardsChannel } from "../src/announcements.js";
+import { configureQuestChannel, configureRewardsChannel } from "../src/announcements.js";
 import type { Env } from "../src/types.js";
 
 vi.mock("../src/assets.js", () => ({
@@ -18,6 +18,8 @@ type Settings = {
   channelId: string | null;
   storeMessageId: string | null;
   raffleMessageId: string | null;
+  questChannelId: string | null;
+  questMessageId: string | null;
 };
 
 class AnnouncementStatement {
@@ -32,6 +34,12 @@ class AnnouncementStatement {
 
   async first<T>(): Promise<T | null> {
     if (!this.sql.includes("FROM guild_settings")) return null;
+    if (this.sql.includes("quest_channel_id")) {
+      return {
+        quest_channel_id: this.settings.questChannelId,
+        quest_panel_message_id: this.settings.questMessageId
+      } as T;
+    }
     return {
       rewards_channel_id: this.settings.channelId,
       store_panel_message_id: this.settings.storeMessageId,
@@ -44,6 +52,10 @@ class AnnouncementStatement {
       this.settings.channelId = String(this.values[0]);
       this.settings.storeMessageId = String(this.values[1]);
       this.settings.raffleMessageId = String(this.values[2]);
+    }
+    if (this.sql.includes("UPDATE guild_settings SET quest_channel_id")) {
+      this.settings.questChannelId = String(this.values[0]);
+      this.settings.questMessageId = String(this.values[1]);
     }
     return { success: true, meta: { changes: 1 } } as D1Result;
   }
@@ -71,13 +83,19 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("store and raffle announcements", () => {
   it("publishes permanent panels and updates them when the channel is saved again", async () => {
-    const settings: Settings = { channelId: null, storeMessageId: null, raffleMessageId: null };
+    const settings: Settings = {
+      channelId: null,
+      storeMessageId: null,
+      raffleMessageId: null,
+      questChannelId: null,
+      questMessageId: null
+    };
     const env = createEnv(settings);
 
     await expect(
       configureRewardsChannel(env, "123456789012345678", "323456789012345678", "https://rewards.example")
     ).resolves.toMatchObject({ channelId: "323456789012345678" });
-    expect(settings).toEqual({
+    expect(settings).toMatchObject({
       channelId: "323456789012345678",
       storeMessageId: "message-1",
       raffleMessageId: "message-2"
@@ -88,5 +106,24 @@ describe("store and raffle announcements", () => {
     expect(calls).toHaveLength(4);
     expect(calls.slice(0, 2).every(([, init]) => init?.method === "POST")).toBe(true);
     expect(calls.slice(2).every(([, init]) => init?.method === "PATCH")).toBe(true);
+  });
+
+  it("publishes and refreshes one permanent quest panel", async () => {
+    const settings: Settings = {
+      channelId: null,
+      storeMessageId: null,
+      raffleMessageId: null,
+      questChannelId: null,
+      questMessageId: null
+    };
+    const env = createEnv(settings);
+
+    await configureQuestChannel(env, "123456789012345678", "423456789012345678", "https://rewards.example");
+    await configureQuestChannel(env, "123456789012345678", "423456789012345678", "https://rewards.example");
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.[1]?.method).toBe("POST");
+    expect(calls[1]?.[1]?.method).toBe("PATCH");
   });
 });

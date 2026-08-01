@@ -95,9 +95,12 @@ import { checkLaunchReadiness } from "./readiness.js";
 import { MemberSessionError, requireMemberSession } from "./member.js";
 import {
   AnnouncementError,
+  announceQuest,
   announceRaffle,
   announceStoreItem,
+  configureQuestChannel,
   configureRewardsChannel,
+  getQuestChannelSettings,
   getRewardsChannelSettings
 } from "./announcements.js";
 
@@ -401,7 +404,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, rewardsChannel, queue, hasIcon, hasLogo] = await Promise.all([
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, rewardsChannel, questChannel, queue, hasIcon, hasLogo] = await Promise.all([
         listChains(env, { includeDemo: true }),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
@@ -418,6 +421,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         listSalesWatches(env, session.guild_id),
         listTextChannels(env, session.guild_id).catch(() => []),
         getRewardsChannelSettings(env, session.guild_id),
+        getQuestChannelSettings(env, session.guild_id),
         env.DB.prepare("SELECT value FROM app_state WHERE key = 'last_queue_run'")
           .first<{ value: string }>()
           .then((row) => ({ enabled: Boolean(env.ROLE_SYNC_QUEUE), lastRunAt: row?.value ?? null })),
@@ -442,6 +446,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         salesWatches,
         channels,
         rewardsChannel,
+        questChannel,
         queue,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
@@ -477,6 +482,24 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         new URL(request.url).origin
       );
       return jsonResponse({ ok: true, rewardsChannel });
+    }
+
+    if (request.method === "POST" && path === "quest-channel") {
+      const input = (await request.json()) as Record<string, unknown>;
+      if (typeof input.channelId !== "string") {
+        return jsonResponse({ error: "Choose a Discord channel for quest posts." }, 400);
+      }
+      const channels = await listTextChannels(env, session.guild_id);
+      if (!channels.some((channel) => channel.id === input.channelId)) {
+        return jsonResponse({ error: "Choose a text channel from this Discord server." }, 400);
+      }
+      const questChannel = await configureQuestChannel(
+        env,
+        session.guild_id,
+        input.channelId,
+        new URL(request.url).origin
+      );
+      return jsonResponse({ ok: true, questChannel });
     }
 
     if (request.method === "POST" && path === "retry-sync-problems") {
@@ -776,7 +799,19 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         action: "quest_created",
         detail: `Quest "${quest.title}" (${quest.kind}, ${quest.reward} points)`
       });
-      return jsonResponse({ ok: true, quest }, 201);
+      let announcementWarning: string | null = null;
+      let announcementPosted = false;
+      try {
+        announcementPosted = await announceQuest(
+          env,
+          session.guild_id,
+          new URL(request.url).origin,
+          quest
+        );
+      } catch (error) {
+        announcementWarning = error instanceof Error ? error.message : "The quest announcement could not be posted.";
+      }
+      return jsonResponse({ ok: true, quest, announcementPosted, announcementWarning }, 201);
     }
 
     if (request.method === "DELETE" && path.startsWith("quests/")) {

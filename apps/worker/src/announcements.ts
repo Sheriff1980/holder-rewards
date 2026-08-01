@@ -1,6 +1,7 @@
 import { currencyIconUrl, hasCurrencyIcon } from "./assets.js";
 import { accentColorNumber, getGuildBranding } from "./branding.js";
 import { getRewardSettings } from "./points.js";
+import type { Quest } from "./quests.js";
 import type { Raffle } from "./raffles.js";
 import type { StoreItem } from "./store.js";
 import type { Env } from "./types.js";
@@ -15,6 +16,11 @@ export type RewardsChannelSettings = {
   channelId: string | null;
   storePanelMessageId: string | null;
   rafflePanelMessageId: string | null;
+};
+
+export type QuestChannelSettings = {
+  channelId: string | null;
+  panelMessageId: string | null;
 };
 
 export class AnnouncementError extends Error {}
@@ -34,6 +40,15 @@ export async function getRewardsChannelSettings(
     storePanelMessageId: row?.store_panel_message_id ?? null,
     rafflePanelMessageId: row?.raffle_panel_message_id ?? null
   };
+}
+
+export async function getQuestChannelSettings(env: Env, guildId: string): Promise<QuestChannelSettings> {
+  const row = await env.DB.prepare(
+    "SELECT quest_channel_id, quest_panel_message_id FROM guild_settings WHERE guild_id = ?"
+  )
+    .bind(guildId)
+    .first<{ quest_channel_id: string | null; quest_panel_message_id: string | null }>();
+  return { channelId: row?.quest_channel_id ?? null, panelMessageId: row?.quest_panel_message_id ?? null };
 }
 
 async function discordMessage(
@@ -68,20 +83,24 @@ async function panelBody(
   env: Env,
   guildId: string,
   origin: string,
-  kind: "store" | "raffles"
+  kind: "quests" | "store" | "raffles"
 ): Promise<Record<string, unknown>> {
   const [branding, rewards, iconAvailable] = await Promise.all([
     getGuildBranding(env, guildId),
     getRewardSettings(env, guildId),
     hasCurrencyIcon(env, guildId)
   ]);
-  const store = kind === "store";
+  const title = kind === "quests" ? "Quests" : kind === "store" ? "Store" : "Raffles";
+  const description = kind === "quests"
+    ? `Complete community quests to earn ${rewards.currencyName}.`
+    : kind === "store"
+      ? `Spend your ${rewards.currencyName} on available community rewards.`
+      : `Use your ${rewards.currencyName} to enter active community raffles.`;
+  const label = kind === "quests" ? "View Quests" : kind === "store" ? "Browse Store" : "View Raffles";
   return {
     embeds: [{
-      title: `${branding.name} ${store ? "Store" : "Raffles"}`,
-      description: store
-        ? `Spend your ${rewards.currencyName} on available community rewards.`
-        : `Use your ${rewards.currencyName} to enter active community raffles.`,
+      title: `${branding.name} ${title}`,
+      description,
       color: accentColorNumber(branding.accentColor),
       ...(iconAvailable ? { thumbnail: { url: currencyIconUrl(origin, guildId) } } : {})
     }],
@@ -90,11 +109,79 @@ async function panelBody(
       components: [{
         type: 2,
         style: 1,
-        label: store ? "Browse Store" : "View Raffles",
+        label,
         custom_id: `rewards:open:${kind}`
       }]
     }]
   };
+}
+
+export async function configureQuestChannel(
+  env: Env,
+  guildId: string,
+  channelId: string,
+  origin: string
+): Promise<QuestChannelSettings> {
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO guilds (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
+    ).bind(guildId),
+    env.DB.prepare(
+      "INSERT INTO guild_settings (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING"
+    ).bind(guildId)
+  ]);
+  const current = await getQuestChannelSettings(env, guildId);
+  const panelMessageId = await discordMessage(
+    env,
+    channelId,
+    await panelBody(env, guildId, origin, "quests"),
+    current.channelId === channelId ? current.panelMessageId : null
+  );
+  await env.DB.prepare(
+    `UPDATE guild_settings SET quest_channel_id = ?, quest_panel_message_id = ?,
+       updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?`
+  )
+    .bind(channelId, panelMessageId, guildId)
+    .run();
+  return { channelId, panelMessageId };
+}
+
+export async function announceQuest(
+  env: Env,
+  guildId: string,
+  origin: string,
+  quest: Quest
+): Promise<boolean> {
+  const settings = await getQuestChannelSettings(env, guildId);
+  if (!settings.channelId) return false;
+  const [branding, rewards, iconAvailable] = await Promise.all([
+    getGuildBranding(env, guildId),
+    getRewardSettings(env, guildId),
+    hasCurrencyIcon(env, guildId)
+  ]);
+  const type = quest.kind === "link_wallet"
+    ? "Link a wallet"
+    : quest.kind === "hold_role"
+      ? "Hold a Discord role"
+      : quest.kind === "daily_claims"
+        ? "Daily claims"
+        : quest.kind === "code"
+          ? "Secret code"
+          : "Manager-reviewed proof";
+  await discordMessage(env, settings.channelId, {
+    embeds: [{
+      title: `New ${branding.name} Quest: ${quest.title}`,
+      description: quest.kind === "custom" ? quest.config.instructions : "A new community quest is available.",
+      color: accentColorNumber(branding.accentColor),
+      ...(iconAvailable ? { thumbnail: { url: currencyIconUrl(origin, guildId) } } : {}),
+      fields: [
+        { name: "Reward", value: `${quest.reward.toLocaleString()} ${rewards.currencyName}`, inline: true },
+        { name: "Quest", value: type, inline: true }
+      ]
+    }],
+    components: [{ type: 1, components: [{ type: 2, style: 1, label: "View Quest", custom_id: "rewards:open:quests" }] }]
+  });
+  return true;
 }
 
 export async function configureRewardsChannel(
