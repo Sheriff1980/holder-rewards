@@ -31,6 +31,7 @@ export type DiscordInteraction = {
   data?: {
     name?: string;
     custom_id?: string;
+    values?: string[];
     options?: Array<{
       name: string;
       type: number;

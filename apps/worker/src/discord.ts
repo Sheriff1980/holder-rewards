@@ -1,6 +1,6 @@
 import nacl from "tweetnacl";
 import type { DiscordInteraction, Env } from "./types.js";
-import { createAdminSession, listManageableDiscordRoles } from "./admin.js";
+import { listManageableDiscordRoles } from "./admin.js";
 import { recordAuditEvent } from "./audit.js";
 import { createVerificationSession } from "./verification.js";
 import {
@@ -25,6 +25,7 @@ import { accentColorNumber, getGuildBranding } from "./branding.js";
 import { checkQuest, listQuests, listQuestsWithStatus, QuestError, submitQuestCode, submitQuestProof } from "./quests.js";
 import { enterRaffle, listRaffleEntriesForMember, listRaffles, RaffleError } from "./raffles.js";
 import { listStoreItems, listStorePurchaseCountsForMember, purchaseStoreItem, StoreError } from "./store.js";
+import { handleManagerInteraction, managerDashboardResponse } from "./manager-discord.js";
 
 const EPHEMERAL = 1 << 6;
 const MANAGE_GUILD = 1n << 5n;
@@ -707,6 +708,18 @@ export async function handleDiscordInteraction(
     return ephemeralMessage(
       "This request could not be processed safely right now. Please try the command again."
     );
+  }
+
+  if (interaction.data?.custom_id?.startsWith("manager:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Manager controls are available inside a Discord server.");
+    }
+    if (!canManageGuild(interaction)) {
+      return ephemeralMessage("You need the Manage Server permission to use manager controls.");
+    }
+    return (await handleManagerInteraction(interaction, requestUrl, env, interaction.guild_id, discordUserId))
+      ?? ephemeralMessage("That manager option is not available.");
   }
 
   if (interaction.type === 3 && interaction.data?.custom_id === "verify:start") {
@@ -1408,29 +1421,7 @@ export async function handleDiscordInteraction(
       if (subcommand === "manage") {
         const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
         if (!discordUserId) return ephemeralMessage("Your Discord account could not be identified.");
-        const token = await createAdminSession(env, discordUserId, interaction.guild_id);
-        const manageUrl = new URL("/manage", requestUrl.origin);
-        manageUrl.searchParams.set("token", token);
-        return Response.json({
-          type: 4,
-          data: {
-            content: "Your private holder-role manager is ready. This link expires in 30 minutes.",
-            flags: EPHEMERAL,
-            components: [
-              {
-                type: 1,
-                components: [
-                  {
-                    type: 2,
-                    style: 5,
-                    label: "Manage Holder Roles",
-                    url: manageUrl.toString()
-                  }
-                ]
-              }
-            ]
-          }
-        });
+        return managerDashboardResponse(env, interaction.guild_id, discordUserId, requestUrl);
       }
 
       if (

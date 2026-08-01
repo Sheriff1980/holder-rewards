@@ -285,6 +285,19 @@ beforeEach(() => {
 });
 
 describe("Discord interaction safety", () => {
+  it("blocks manager dashboard buttons for members without Manage Server", async () => {
+    const response = await handleDiscordInteraction({
+      id: "103456789012345678",
+      type: 3,
+      guild_id: "123456789012345678",
+      member: { permissions: "0", user: { id: "223456789012345678" } },
+      data: { custom_id: "manager:home" }
+    }, new URL("https://holder.example/interactions"), createEnv());
+
+    expect(await responseContent(response)).toContain("Manage Server permission");
+    expect(mocks.createAdminSession).not.toHaveBeenCalled();
+  });
+
   it("opens store items privately inside Discord without a website link", async () => {
     mocks.listStoreItems.mockResolvedValue([{
       id: "item-1",

@@ -357,7 +357,7 @@ describe("Cloudflare Worker", () => {
     ]);
   });
 
-  it("gives server managers a private browser rule-manager link", async () => {
+  it("gives server managers a private Discord dashboard with an optional advanced link", async () => {
     const response = await handleDiscordInteraction(
       {
         id: "123456789012345680",
@@ -373,11 +373,16 @@ describe("Cloudflare Worker", () => {
       createEnv()
     );
     const body = (await response.json()) as {
-      data: { flags: number; components: Array<{ components: Array<{ url: string }> }> };
+      data: { flags: number; content: string; components: Array<{ components: Array<{ label: string; custom_id?: string; url?: string }> }> };
     };
 
     expect(body.data.flags).toBe(64);
-    expect(body.data.components[0]?.components[0]?.url).toMatch(
+    expect(body.data.content).toContain("Manager dashboard");
+    expect(body.data.components[0]?.components).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Reward settings", custom_id: "manager:rewards" }),
+      expect.objectContaining({ label: "Quests", custom_id: "manager:quests" })
+    ]));
+    expect(body.data.components[1]?.components.find((component) => component.label === "Advanced manager")?.url).toMatch(
       /^https:\/\/example\.com\/manage\?token=/
     );
   });
