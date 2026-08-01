@@ -93,6 +93,13 @@ import { getWalletPrivacySettings, updateWalletPrivacySettings } from "./privacy
 import { checkChainProviders } from "./health.js";
 import { checkLaunchReadiness } from "./readiness.js";
 import { MemberSessionError, requireMemberSession } from "./member.js";
+import {
+  AnnouncementError,
+  announceRaffle,
+  announceStoreItem,
+  configureRewardsChannel,
+  getRewardsChannelSettings
+} from "./announcements.js";
 
 const securityHeaders = {
   "Content-Security-Policy":
@@ -394,7 +401,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, queue, hasIcon, hasLogo] = await Promise.all([
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, rewardsChannel, queue, hasIcon, hasLogo] = await Promise.all([
         listChains(env, { includeDemo: true }),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
@@ -410,6 +417,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         listPendingSubmissions(env, session.guild_id),
         listSalesWatches(env, session.guild_id),
         listTextChannels(env, session.guild_id).catch(() => []),
+        getRewardsChannelSettings(env, session.guild_id),
         env.DB.prepare("SELECT value FROM app_state WHERE key = 'last_queue_run'")
           .first<{ value: string }>()
           .then((row) => ({ enabled: Boolean(env.ROLE_SYNC_QUEUE), lastRunAt: row?.value ?? null })),
@@ -433,6 +441,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         pendingSubmissions,
         salesWatches,
         channels,
+        rewardsChannel,
         queue,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
@@ -450,6 +459,24 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         checkedAt: new Date().toISOString(),
         providers
       });
+    }
+
+    if (request.method === "POST" && path === "rewards-channel") {
+      const input = (await request.json()) as Record<string, unknown>;
+      if (typeof input.channelId !== "string") {
+        return jsonResponse({ error: "Choose a Discord channel for store and raffle posts." }, 400);
+      }
+      const channels = await listTextChannels(env, session.guild_id);
+      if (!channels.some((channel) => channel.id === input.channelId)) {
+        return jsonResponse({ error: "Choose a text channel from this Discord server." }, 400);
+      }
+      const rewardsChannel = await configureRewardsChannel(
+        env,
+        session.guild_id,
+        input.channelId,
+        new URL(request.url).origin
+      );
+      return jsonResponse({ ok: true, rewardsChannel });
     }
 
     if (request.method === "POST" && path === "retry-sync-problems") {
@@ -814,7 +841,14 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         action: "raffle_created",
         detail: `Raffle "${raffle.title}" (${raffle.entryCost} points per entry)`
       });
-      return jsonResponse({ ok: true, raffle }, 201);
+      let announcementWarning: string | null = null;
+      let announcementPosted = false;
+      try {
+        announcementPosted = await announceRaffle(env, session.guild_id, new URL(request.url).origin, raffle);
+      } catch (error) {
+        announcementWarning = error instanceof Error ? error.message : "The raffle announcement could not be posted.";
+      }
+      return jsonResponse({ ok: true, raffle, announcementPosted, announcementWarning }, 201);
     }
 
     if (request.method === "POST" && path.startsWith("raffles/") && path.endsWith("/draw")) {
@@ -864,7 +898,14 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         action: "store_item_created",
         detail: `Store item "${item.title}" (${item.price} points)`
       });
-      return jsonResponse({ ok: true, item }, 201);
+      let announcementWarning: string | null = null;
+      let announcementPosted = false;
+      try {
+        announcementPosted = await announceStoreItem(env, session.guild_id, new URL(request.url).origin, item);
+      } catch (error) {
+        announcementWarning = error instanceof Error ? error.message : "The store announcement could not be posted.";
+      }
+      return jsonResponse({ ok: true, item, announcementPosted, announcementWarning }, 201);
     }
 
     if (request.method === "DELETE" && path.startsWith("store-items/")) {
@@ -938,6 +979,9 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
       return jsonResponse({ error: error.message }, 400);
     }
     if (error instanceof SalesWatchError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof AnnouncementError) {
       return jsonResponse({ error: error.message }, 400);
     }
     if (error instanceof SyntaxError) {

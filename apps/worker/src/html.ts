@@ -545,6 +545,14 @@ export function managerPage(env: Env): string {
           </div>
         </section>
         <section class="panel">
+          <h2>Store and raffle channel</h2>
+          <p class="muted">The bot posts permanent Store and Raffle panels here and announces new items and raffles automatically.</p>
+          <label for="rewards-channel">Discord channel</label>
+          <select id="rewards-channel"></select>
+          <div class="form-actions"><button id="save-rewards-channel" type="button">Save and publish panels</button></div>
+          <div id="rewards-channel-result" aria-live="polite"></div>
+        </section>
+        <section class="panel">
           <h2>Raffles</h2>
           <form id="raffle-form">
             <div class="field-grid">
@@ -741,6 +749,9 @@ export function managerPage(env: Env): string {
       const questList = document.getElementById("quest-list");
       const submissionArea = document.getElementById("submission-area");
       const submissionList = document.getElementById("submission-list");
+      const rewardsChannel = document.getElementById("rewards-channel");
+      const saveRewardsChannel = document.getElementById("save-rewards-channel");
+      const rewardsChannelResult = document.getElementById("rewards-channel-result");
       const raffleForm = document.getElementById("raffle-form");
       const rafflePrizeRole = document.getElementById("raffle-prize-role");
       const saveRaffle = document.getElementById("save-raffle");
@@ -1695,6 +1706,48 @@ export function managerPage(env: Env): string {
         }
       }
 
+      function setRewardsChannelOptions() {
+        rewardsChannel.replaceChildren();
+        const prompt = document.createElement("option");
+        prompt.value = "";
+        prompt.textContent = data.channels && data.channels.length
+          ? "Choose a channel"
+          : "No text channels available";
+        rewardsChannel.append(prompt);
+        for (const channel of data.channels || []) {
+          const option = document.createElement("option");
+          option.value = channel.id;
+          option.textContent = "#" + channel.name;
+          rewardsChannel.append(option);
+        }
+        rewardsChannel.value = data.rewardsChannel?.channelId || "";
+      }
+
+      saveRewardsChannel.addEventListener("click", async () => {
+        if (!rewardsChannel.value) {
+          rewardsChannelResult.className = "error";
+          rewardsChannelResult.textContent = "Choose a Discord channel.";
+          return;
+        }
+        saveRewardsChannel.disabled = true;
+        rewardsChannelResult.className = "";
+        rewardsChannelResult.textContent = "Publishing the Store and Raffle panels...";
+        try {
+          const saved = await api("rewards-channel", {
+            method: "POST",
+            body: JSON.stringify({ channelId: rewardsChannel.value })
+          });
+          data.rewardsChannel = saved.rewardsChannel;
+          rewardsChannelResult.className = "success";
+          rewardsChannelResult.textContent = "Panels published. New store items and raffles will be announced automatically.";
+        } catch (error) {
+          rewardsChannelResult.className = "error";
+          rewardsChannelResult.textContent = error instanceof Error ? error.message : "The panels could not be published.";
+        } finally {
+          saveRewardsChannel.disabled = false;
+        }
+      });
+
       function renderRaffles() {
         raffleList.replaceChildren();
         if (!data.raffles || !data.raffles.length) {
@@ -1756,7 +1809,11 @@ export function managerPage(env: Env): string {
           renderRaffles();
           raffleForm.reset();
           raffleResult.className = "success";
-          raffleResult.textContent = "Raffle open. Members enter with /raffle enter.";
+          raffleResult.textContent = saved.announcementWarning
+            ? "Raffle opened, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Raffle open and announced in the Store and Raffle channel."
+              : "Raffle open. Choose a Store and Raffle channel to announce future raffles.";
         } catch (error) {
           raffleResult.className = "error";
           raffleResult.textContent = error instanceof Error ? error.message : "Raffle could not be opened.";
@@ -1892,7 +1949,11 @@ export function managerPage(env: Env): string {
           renderStoreItems();
           storeForm.reset();
           storeResult.className = "success";
-          storeResult.textContent = "Item added. Members can buy it with /store buy.";
+          storeResult.textContent = saved.announcementWarning
+            ? "Item added, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Item added and announced in the Store and Raffle channel."
+              : "Item added. Choose a Store and Raffle channel to announce future items.";
         } catch (error) {
           storeResult.className = "error";
           storeResult.textContent = error instanceof Error ? error.message : "Item could not be added.";
@@ -2001,6 +2062,7 @@ export function managerPage(env: Env): string {
         updateQuestFields();
         renderQuests();
         renderSubmissions();
+        setRewardsChannelOptions();
         setPrizeRoleOptions();
         renderRaffles();
         setStoreRoleOptions();

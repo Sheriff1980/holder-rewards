@@ -76,7 +76,7 @@ describe("migrations", () => {
   it("applies the full set once and reports zero on the second run", () => {
     const db = createNodeD1(":memory:");
     const applied = applyMigrations(db.sqlite, MIGRATIONS_DIR);
-    expect(applied).toBeGreaterThanOrEqual(29);
+    expect(applied).toBeGreaterThanOrEqual(30);
     expect(applyMigrations(db.sqlite, MIGRATIONS_DIR)).toBe(0);
 
     const tables = db.sqlite
@@ -92,6 +92,8 @@ describe("migrations", () => {
     expect(ruleColumns.some((column) => column.name === "group_key")).toBe(true);
     const storeColumns = db.sqlite.prepare("PRAGMA table_info(store_items)").all() as Array<{ name: string }>;
     expect(storeColumns.some((column) => column.name === "purchase_limit_per_member")).toBe(true);
+    const channelColumns = db.sqlite.prepare("PRAGMA table_info(guild_settings)").all() as Array<{ name: string }>;
+    expect(channelColumns.some((column) => column.name === "rewards_channel_id")).toBe(true);
   });
 });
 

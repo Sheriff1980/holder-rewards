@@ -106,6 +106,8 @@ describe("Cloudflare Worker", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("Community rewards");
+    expect(html).toContain("Store and raffle channel");
+    expect(html).toContain("Save and publish panels");
     expect(html).toContain("Verified members");
     expect(html).toContain("Recent activity");
     expect(html).toContain("Sync problems");
