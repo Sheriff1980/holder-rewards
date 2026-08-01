@@ -22,10 +22,9 @@ import {
 } from "./points.js";
 import { brandLogoUrl, currencyIconUrl, hasBrandLogo, hasCurrencyIcon } from "./assets.js";
 import { accentColorNumber, getGuildBranding } from "./branding.js";
-import { createMemberSession } from "./member.js";
 import { checkQuest, listQuests, listQuestsWithStatus, QuestError, submitQuestCode, submitQuestProof } from "./quests.js";
 import { enterRaffle, listRaffleEntriesForMember, listRaffles, RaffleError } from "./raffles.js";
-import { listStoreItems, purchaseStoreItem, StoreError } from "./store.js";
+import { listStoreItems, listStorePurchaseCountsForMember, purchaseStoreItem, StoreError } from "./store.js";
 
 const EPHEMERAL = 1 << 6;
 const MANAGE_GUILD = 1n << 5n;
@@ -423,6 +422,177 @@ function ephemeralRewardMessage(content: string, iconUrl: string | null): Respon
   });
 }
 
+type DiscordButton = {
+  type: 2;
+  style: number;
+  label: string;
+  custom_id: string;
+  disabled?: boolean;
+};
+
+const MEMBER_VIEW_PAGE_SIZE = 5;
+
+function privateComponentsMessage(content: string, buttons: DiscordButton[], pageButtons: DiscordButton[] = []): Response {
+  return Response.json({
+    type: 4,
+    data: {
+      content: content.slice(0, 1_900),
+      flags: EPHEMERAL,
+      allowed_mentions: { parse: [] },
+      components: [
+        ...(buttons.length > 0 ? [{ type: 1, components: buttons }] : []),
+        ...(pageButtons.length > 0 ? [{ type: 1, components: pageButtons }] : [])
+      ]
+    }
+  });
+}
+
+function pageNumber(customId: string): number {
+  const value = Number(customId.split(":").at(-1));
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function paginationButtons(view: string, page: number, total: number): DiscordButton[] {
+  const pages = Math.max(1, Math.ceil(total / MEMBER_VIEW_PAGE_SIZE));
+  if (pages === 1) return [];
+  return [
+    {
+      type: 2,
+      style: 2,
+      label: "Previous",
+      custom_id: `rewards:view:${view}:${Math.max(0, page - 1)}`,
+      disabled: page === 0
+    },
+    {
+      type: 2,
+      style: 2,
+      label: `Page ${page + 1} of ${pages}`,
+      custom_id: `rewards:view:${view}:${page}`,
+      disabled: true
+    },
+    {
+      type: 2,
+      style: 2,
+      label: "Next",
+      custom_id: `rewards:view:${view}:${Math.min(pages - 1, page + 1)}`,
+      disabled: page >= pages - 1
+    }
+  ];
+}
+
+async function questViewResponse(env: Env, guildId: string, discordUserId: string, page: number): Promise<Response> {
+  const [quests, settings] = await Promise.all([
+    listQuestsWithStatus(env, guildId, discordUserId),
+    getRewardSettings(env, guildId)
+  ]);
+  if (quests.length === 0) return ephemeralMessage("This server has no open quests right now.");
+  const safePage = Math.min(page, Math.max(0, Math.ceil(quests.length / MEMBER_VIEW_PAGE_SIZE) - 1));
+  const visible = quests.slice(safePage * MEMBER_VIEW_PAGE_SIZE, (safePage + 1) * MEMBER_VIEW_PAGE_SIZE);
+  const lines = visible.map((quest) => {
+    const detail = quest.kind === "link_wallet"
+      ? "Link a wallet"
+      : quest.kind === "hold_role"
+        ? "Hold the required role"
+        : quest.kind === "daily_claims"
+          ? `Claim on ${quest.config.days} different days`
+          : quest.kind === "custom"
+            ? quest.config.instructions
+            : "Enter the community's secret code";
+    const status = quest.completed ? "Completed" : quest.pendingSubmission ? "Waiting for review" : "Available";
+    return `**${quest.title}** - ${quest.reward.toLocaleString()} ${settings.currencyName}\n${detail} | ${status}`;
+  });
+  const buttons = visible.map((quest): DiscordButton => ({
+    type: 2,
+    style: quest.completed || quest.pendingSubmission ? 2 : 1,
+    label: `${quest.completed ? "Done" : quest.pendingSubmission ? "Pending" : quest.kind === "custom" ? "Submit" : quest.kind === "code" ? "Enter code" : "Check"}: ${quest.title}`.slice(0, 80),
+    custom_id: quest.kind === "custom"
+      ? `quest:proof:${quest.id}`
+      : quest.kind === "code"
+        ? `quest:code:${quest.id}`
+        : `quest:check:${quest.id}`,
+    disabled: quest.completed || quest.pendingSubmission
+  }));
+  return privateComponentsMessage(
+    `**Community quests**\n${lines.join("\n\n")}`,
+    buttons,
+    paginationButtons("quests", safePage, quests.length)
+  );
+}
+
+async function storeViewResponse(env: Env, guildId: string, discordUserId: string, page: number): Promise<Response> {
+  const [items, purchases, settings, balance] = await Promise.all([
+    listStoreItems(env, guildId),
+    listStorePurchaseCountsForMember(env, guildId, discordUserId),
+    getRewardSettings(env, guildId),
+    getPointsBalance(env, guildId, discordUserId)
+  ]);
+  if (items.length === 0) return ephemeralMessage("The store has no items for sale right now.");
+  const safePage = Math.min(page, Math.max(0, Math.ceil(items.length / MEMBER_VIEW_PAGE_SIZE) - 1));
+  const visible = items.slice(safePage * MEMBER_VIEW_PAGE_SIZE, (safePage + 1) * MEMBER_VIEW_PAGE_SIZE);
+  const lines = visible.map((item) => {
+    const bought = purchases.get(item.id) ?? 0;
+    const stock = item.stock === null ? "Unlimited stock" : `${item.stock.toLocaleString()} left`;
+    const limit = item.purchaseLimitPerMember === null ? "" : ` | You bought ${bought}/${item.purchaseLimitPerMember}`;
+    return `**${item.title}** - ${item.price.toLocaleString()} ${settings.currencyName}\n${item.description || "Community store item"} | ${stock}${limit}`;
+  });
+  const buttons = visible.map((item): DiscordButton => {
+    const bought = purchases.get(item.id) ?? 0;
+    const unavailable = item.stock === 0 || (item.purchaseLimitPerMember !== null && bought >= item.purchaseLimitPerMember);
+    return {
+      type: 2,
+      style: unavailable ? 2 : 1,
+      label: `${unavailable ? "Unavailable" : "Buy"}: ${item.title}`.slice(0, 80),
+      custom_id: `store:buy:${item.id}`,
+      disabled: unavailable
+    };
+  });
+  return privateComponentsMessage(
+    `**Community store**\nYour balance: ${balance.toLocaleString()} ${settings.currencyName}\n\n${lines.join("\n\n")}`,
+    buttons,
+    paginationButtons("store", safePage, items.length)
+  );
+}
+
+async function raffleViewResponse(env: Env, guildId: string, discordUserId: string, page: number): Promise<Response> {
+  const [raffles, entries, settings, balance] = await Promise.all([
+    listRaffles(env, guildId),
+    listRaffleEntriesForMember(env, guildId, discordUserId),
+    getRewardSettings(env, guildId),
+    getPointsBalance(env, guildId, discordUserId)
+  ]);
+  const open = raffles.filter((raffle) => raffle.status === "open");
+  if (open.length === 0) return ephemeralMessage("There are no open raffles right now.");
+  const safePage = Math.min(page, Math.max(0, Math.ceil(open.length / MEMBER_VIEW_PAGE_SIZE) - 1));
+  const visible = open.slice(safePage * MEMBER_VIEW_PAGE_SIZE, (safePage + 1) * MEMBER_VIEW_PAGE_SIZE);
+  const lines = visible.map((raffle) => {
+    const mine = entries.get(raffle.id) ?? 0;
+    return `**${raffle.title}** - ${raffle.entryCost.toLocaleString()} ${settings.currencyName} per entry\nPrize: ${raffle.prize} | ${raffle.totalEntries.toLocaleString()} total entries | You: ${mine}/${raffle.maxEntriesPerMember}`;
+  });
+  const buttons = visible.map((raffle): DiscordButton => {
+    const mine = entries.get(raffle.id) ?? 0;
+    const unavailable = mine >= raffle.maxEntriesPerMember || balance < raffle.entryCost;
+    return {
+      type: 2,
+      style: unavailable ? 2 : 1,
+      label: `${unavailable ? "Unavailable" : "Buy 1 entry"}: ${raffle.title}`.slice(0, 80),
+      custom_id: `raffle:enter:${raffle.id}`,
+      disabled: unavailable
+    };
+  });
+  return privateComponentsMessage(
+    `**Community raffles**\nYour balance: ${balance.toLocaleString()} ${settings.currencyName}\n\n${lines.join("\n\n")}`,
+    buttons,
+    paginationButtons("raffles", safePage, open.length)
+  );
+}
+
+async function memberViewResponse(env: Env, guildId: string, discordUserId: string, view: string, page = 0): Promise<Response> {
+  if (view === "quests") return questViewResponse(env, guildId, discordUserId, page);
+  if (view === "store") return storeViewResponse(env, guildId, discordUserId, page);
+  if (view === "raffles") return raffleViewResponse(env, guildId, discordUserId, page);
+  return ephemeralMessage("That rewards section is not available.");
+}
+
 function canManageGuild(interaction: DiscordInteraction): boolean {
   if (!interaction.member?.permissions) {
     return false;
@@ -618,32 +788,22 @@ export async function handleDiscordInteraction(
       return ephemeralMessage("That rewards section is not available.");
     }
     try {
-      const available = view === "quests"
-        ? (await listQuests(env, interaction.guild_id)).length > 0
-        : view === "store"
-          ? (await listStoreItems(env, interaction.guild_id)).length > 0
-          : (await listRaffles(env, interaction.guild_id)).some((raffle) => raffle.status === "open");
-      if (!available) {
-        const label = view === "quests" ? "quests" : view === "store" ? "store items" : "open raffles";
-        return ephemeralMessage(`There are no ${label} available right now.`);
-      }
-      const token = await createMemberSession(env, discordUserId, interaction.guild_id);
-      const memberUrl = new URL("/rewards", requestUrl.origin);
-      memberUrl.searchParams.set("token", token);
-      memberUrl.searchParams.set("view", view);
-      return Response.json({
-        type: 4,
-        data: {
-          content: `Your private ${view} page is ready.`,
-          flags: EPHEMERAL,
-          components: [{
-            type: 1,
-            components: [{ type: 2, style: 5, label: `Open ${view[0]!.toUpperCase()}${view.slice(1)}`, url: memberUrl.toString() }]
-          }]
-        }
-      });
+      return await memberViewResponse(env, interaction.guild_id, discordUserId, view);
     } catch {
-      return ephemeralMessage("Your rewards page is temporarily unavailable. Please try again shortly.");
+      return ephemeralMessage("That rewards section is temporarily unavailable. Please try again shortly.");
+    }
+  }
+
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("rewards:view:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Rewards are available inside a Discord server.");
+    }
+    const parts = interaction.data.custom_id.split(":");
+    try {
+      return await memberViewResponse(env, interaction.guild_id, discordUserId, parts[2] ?? "", pageNumber(interaction.data.custom_id));
+    } catch {
+      return ephemeralMessage("That rewards section is temporarily unavailable. Please try again shortly.");
     }
   }
 
@@ -714,6 +874,62 @@ export async function handleDiscordInteraction(
     });
   }
 
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("quest:code:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Quests are available inside a Discord server.");
+    }
+    const questId = interaction.data.custom_id.slice("quest:code:".length);
+    const quest = (await listQuests(env, interaction.guild_id)).find(
+      (candidate) => candidate.id === questId && candidate.kind === "code"
+    );
+    if (!quest) return ephemeralMessage("That quest is no longer available.");
+    return Response.json({
+      type: 9,
+      data: {
+        custom_id: `quest:code:${quest.id}`,
+        title: quest.title.slice(0, 45),
+        components: [{
+          type: 1,
+          components: [{
+            type: 4,
+            custom_id: "code",
+            label: "Secret code",
+            style: 1,
+            required: true,
+            max_length: 100,
+            placeholder: "Enter the community's secret code"
+          }]
+        }]
+      }
+    });
+  }
+
+  if (interaction.type === 5 && interaction.data?.custom_id?.startsWith("quest:code:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) {
+      return ephemeralMessage("Quests are available inside a Discord server.");
+    }
+    const code = interaction.data.components?.[0]?.components?.[0]?.value;
+    try {
+      const [outcome, settings] = await Promise.all([
+        submitQuestCode(env, interaction.guild_id, discordUserId, code),
+        getRewardSettings(env, interaction.guild_id)
+      ]);
+      if (outcome.result === "no_match") return ephemeralMessage("That code did not match this server's open code quest.");
+      if (outcome.result === "already_completed" || !outcome.quest) {
+        return ephemeralMessage(`You already completed ${outcome.quest?.title ?? "that quest"}.`);
+      }
+      return privateComponentsMessage(
+        `Quest complete: ${outcome.quest.title}. You earned ${outcome.quest.reward.toLocaleString()} ${settings.currencyName}. New balance: ${outcome.balance.toLocaleString()}.`,
+        [{ type: 2, style: 2, label: "Back to quests", custom_id: "rewards:view:quests:0" }]
+      );
+    } catch (error) {
+      if (error instanceof QuestError) return ephemeralMessage(error.message);
+      return ephemeralMessage("That code could not be checked right now. Please try again shortly.");
+    }
+  }
+
   if (interaction.type === 5 && interaction.data?.custom_id?.startsWith("quest:proof:")) {
     const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
     if (!discordUserId || !interaction.guild_id) {
@@ -731,6 +947,46 @@ export async function handleDiscordInteraction(
         return ephemeralMessage(error.message);
       }
       return ephemeralMessage("Your proof could not be submitted right now. Please try again shortly.");
+    }
+  }
+
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("store:buy:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) return ephemeralMessage("The store is available inside a Discord server.");
+    const itemId = interaction.data.custom_id.slice("store:buy:".length);
+    try {
+      const purchase = await purchaseStoreItem(env, { guildId: interaction.guild_id, itemId, discordUserId });
+      const fulfillment = purchase.roleGranted
+        ? " Your Discord role was added."
+        : purchase.item.roleId
+          ? ""
+          : " A manager will fulfill your purchase.";
+      return privateComponentsMessage(
+        `You bought **${purchase.item.title}** for ${purchase.item.price.toLocaleString()} ${purchase.currencyName}. New balance: ${purchase.balance.toLocaleString()}.${fulfillment}`,
+        [{ type: 2, style: 2, label: "Back to store", custom_id: "rewards:view:store:0" }]
+      );
+    } catch (error) {
+      if (error instanceof StoreError) return ephemeralMessage(error.message);
+      return ephemeralMessage("That purchase could not be completed right now. You were not charged; please try again shortly.");
+    }
+  }
+
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("raffle:enter:")) {
+    const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+    if (!discordUserId || !interaction.guild_id) return ephemeralMessage("Raffles are available inside a Discord server.");
+    const raffleId = interaction.data.custom_id.slice("raffle:enter:".length);
+    try {
+      const entry = await enterRaffle(env, { guildId: interaction.guild_id, raffleId, discordUserId, count: 1 });
+      return privateComponentsMessage(
+        `You bought 1 entry in **${entry.raffle.title}** for ${entry.cost.toLocaleString()} ${entry.currencyName}. New balance: ${entry.balance.toLocaleString()}.`,
+        [
+          { type: 2, style: 1, label: "Buy another entry", custom_id: `raffle:enter:${entry.raffle.id}` },
+          { type: 2, style: 2, label: "Back to raffles", custom_id: "rewards:view:raffles:0" }
+        ]
+      );
+    } catch (error) {
+      if (error instanceof RaffleError) return ephemeralMessage(error.message);
+      return ephemeralMessage("That raffle entry could not be completed right now. You were not charged; please try again shortly.");
     }
   }
 

@@ -15,10 +15,21 @@ const mocks = vi.hoisted(() => ({
   grantPoints: vi.fn(),
   hasBrandLogo: vi.fn(),
   hasCurrencyIcon: vi.fn(),
+  listQuests: vi.fn(),
+  listQuestsWithStatus: vi.fn(),
+  listRaffleEntriesForMember: vi.fn(),
+  listRaffles: vi.fn(),
   listManageableDiscordRoles: vi.fn(),
   listRoleRules: vi.fn(),
+  listStoreItems: vi.fn(),
+  listStorePurchaseCountsForMember: vi.fn(),
+  purchaseStoreItem: vi.fn(),
   recordAuditEvent: vi.fn(),
   removeRoleRule: vi.fn(),
+  enterRaffle: vi.fn(),
+  submitQuestCode: vi.fn(),
+  submitQuestProof: vi.fn(),
+  checkQuest: vi.fn(),
   syncMemberRoles: vi.fn(),
   updateRoleMatchMode: vi.fn()
 }));
@@ -57,6 +68,26 @@ vi.mock("../src/assets.js", () => ({
 vi.mock("../src/branding.js", () => ({
   accentColorNumber: vi.fn(),
   getGuildBranding: mocks.getGuildBranding
+}));
+vi.mock("../src/quests.js", () => ({
+  QuestError: class QuestError extends Error {},
+  checkQuest: mocks.checkQuest,
+  listQuests: mocks.listQuests,
+  listQuestsWithStatus: mocks.listQuestsWithStatus,
+  submitQuestCode: mocks.submitQuestCode,
+  submitQuestProof: mocks.submitQuestProof
+}));
+vi.mock("../src/raffles.js", () => ({
+  RaffleError: class RaffleError extends Error {},
+  enterRaffle: mocks.enterRaffle,
+  listRaffleEntriesForMember: mocks.listRaffleEntriesForMember,
+  listRaffles: mocks.listRaffles
+}));
+vi.mock("../src/store.js", () => ({
+  StoreError: class StoreError extends Error {},
+  listStoreItems: mocks.listStoreItems,
+  listStorePurchaseCountsForMember: mocks.listStorePurchaseCountsForMember,
+  purchaseStoreItem: mocks.purchaseStoreItem
 }));
 
 import {
@@ -244,9 +275,124 @@ beforeEach(() => {
     dailyClaimAmount: 10,
     holderDailyAmount: 5
   });
+  mocks.getPointsBalance.mockResolvedValue(100);
+  mocks.listQuests.mockResolvedValue([]);
+  mocks.listQuestsWithStatus.mockResolvedValue([]);
+  mocks.listRaffles.mockResolvedValue([]);
+  mocks.listRaffleEntriesForMember.mockResolvedValue(new Map());
+  mocks.listStoreItems.mockResolvedValue([]);
+  mocks.listStorePurchaseCountsForMember.mockResolvedValue(new Map());
 });
 
 describe("Discord interaction safety", () => {
+  it("opens store items privately inside Discord without a website link", async () => {
+    mocks.listStoreItems.mockResolvedValue([{
+      id: "item-1",
+      guildId: "123456789012345678",
+      title: "Neon Role",
+      description: "Limited community role",
+      price: 25,
+      roleId: null,
+      stock: 3,
+      purchaseLimitPerMember: 1
+    }]);
+
+    const response = await handleDiscordInteraction({
+      id: "113456789012345678",
+      type: 3,
+      guild_id: "123456789012345678",
+      member: { permissions: "0", user: { id: "223456789012345678" } },
+      data: { custom_id: "rewards:open:store" }
+    }, new URL("https://holder.example/interactions"), createEnv());
+    const body = await response.json() as { data: { flags: number; content: string; components: Array<{ components: Array<Record<string, unknown>> }> } };
+
+    expect(body.data.flags).toBe(64);
+    expect(body.data.content).toContain("Neon Role");
+    expect(body.data.content).not.toContain("https://");
+    expect(body.data.components[0]?.components[0]).toEqual(expect.objectContaining({
+      label: "Buy: Neon Role",
+      custom_id: "store:buy:item-1"
+    }));
+  });
+
+  it("opens private quest actions including a Discord code form", async () => {
+    mocks.listQuestsWithStatus.mockResolvedValue([{
+      id: "quest-1",
+      guildId: "123456789012345678",
+      title: "Find the code",
+      kind: "code",
+      config: {},
+      reward: 10,
+      completed: false,
+      pendingSubmission: false
+    }]);
+
+    const response = await handleDiscordInteraction({
+      id: "123456789012345679",
+      type: 3,
+      guild_id: "123456789012345678",
+      member: { permissions: "0", user: { id: "223456789012345678" } },
+      data: { custom_id: "rewards:open:quests" }
+    }, new URL("https://holder.example/interactions"), createEnv());
+    const body = await response.json() as { data: { flags: number; components: Array<{ components: Array<Record<string, unknown>> }> } };
+
+    expect(body.data.flags).toBe(64);
+    expect(body.data.components[0]?.components[0]).toEqual(expect.objectContaining({
+      label: "Enter code: Find the code",
+      custom_id: "quest:code:quest-1"
+    }));
+  });
+
+  it("buys store items directly from a private Discord button", async () => {
+    mocks.purchaseStoreItem.mockResolvedValue({
+      item: { id: "item-1", title: "Neon Role", price: 25, roleId: null },
+      balance: 75,
+      roleGranted: false,
+      currencyName: "Points"
+    });
+
+    const response = await handleDiscordInteraction({
+      id: "133456789012345678",
+      type: 3,
+      guild_id: "123456789012345678",
+      member: { permissions: "0", user: { id: "223456789012345678" } },
+      data: { custom_id: "store:buy:item-1" }
+    }, new URL("https://holder.example/interactions"), createEnv());
+
+    expect(await responseContent(response)).toContain("You bought **Neon Role**");
+    expect(mocks.purchaseStoreItem).toHaveBeenCalledWith(expect.anything(), {
+      guildId: "123456789012345678",
+      itemId: "item-1",
+      discordUserId: "223456789012345678"
+    });
+  });
+
+  it("buys one raffle entry directly from a private Discord button", async () => {
+    mocks.enterRaffle.mockResolvedValue({
+      raffle: { id: "raffle-1", title: "Grid Pass" },
+      count: 1,
+      cost: 5,
+      balance: 95,
+      currencyName: "Points"
+    });
+
+    const response = await handleDiscordInteraction({
+      id: "143456789012345678",
+      type: 3,
+      guild_id: "123456789012345678",
+      member: { permissions: "0", user: { id: "223456789012345678" } },
+      data: { custom_id: "raffle:enter:raffle-1" }
+    }, new URL("https://holder.example/interactions"), createEnv());
+
+    expect(await responseContent(response)).toContain("bought 1 entry in **Grid Pass**");
+    expect(mocks.enterRaffle).toHaveBeenCalledWith(expect.anything(), {
+      guildId: "123456789012345678",
+      raffleId: "raffle-1",
+      discordUserId: "223456789012345678",
+      count: 1
+    });
+  });
+
   it("accepts a fresh signature and rejects an otherwise valid stale signature", () => {
     const keyPair = nacl.sign.keyPair();
     const rawBody = JSON.stringify({ id: "123456789012345678", type: 1 });
