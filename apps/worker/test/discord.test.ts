@@ -519,7 +519,7 @@ describe("Discord interaction safety", () => {
     expect(mocks.claimDailyPoints).not.toHaveBeenCalled();
   });
 
-  it("does not consume a daily claim when ownership confirmation fails", async () => {
+  it("allows a daily claim when a previously verified holder role is retained during an RPC failure", async () => {
     mocks.syncMemberRoles.mockResolvedValue({
       added: [],
       removed: [],
@@ -530,6 +530,25 @@ describe("Discord interaction safety", () => {
 
     const response = await handleDiscordInteraction(
       pointsClaimInteraction("563456789012345678"),
+      new URL("https://holder.example/interactions"),
+      createEnv()
+    );
+
+    expect(await responseContent(response)).toContain("collected 10 Points");
+    expect(mocks.claimDailyPoints).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not consume a daily claim when ownership fails and no holder role is retained", async () => {
+    mocks.syncMemberRoles.mockResolvedValue({
+      added: [],
+      removed: [],
+      unchanged: [],
+      qualified: [],
+      errors: [{ roleId: "423456789012345678", message: "RPC timeout" }]
+    });
+
+    const response = await handleDiscordInteraction(
+      pointsClaimInteraction("573456789012345678"),
       new URL("https://holder.example/interactions"),
       createEnv()
     );

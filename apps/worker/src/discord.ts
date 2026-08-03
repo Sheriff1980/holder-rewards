@@ -613,7 +613,10 @@ async function claimRewardResponse(
     ? currencyIconUrl(requestUrl.origin, guildId)
     : null;
   const roleSync = await syncMemberRoles(env, guildId, discordUserId);
-  if (roleSync.qualified.length === 0) {
+  const retainedHolderRole = roleSync.errors.some((error) =>
+    roleSync.unchanged.includes(error.roleId)
+  );
+  if (roleSync.qualified.length === 0 && !retainedHolderRole) {
     return ephemeralRewardMessage(
       roleSync.errors.length > 0
         ? "Your holder status could not be confirmed right now. No claim was used; please try again shortly."
