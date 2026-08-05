@@ -7,6 +7,8 @@ export type NodeConfig = {
   migrationsDir: string;
   publicAppUrl: string;
   discordBotToken: string;
+  discordApplicationId?: string;
+  discordClientSecret?: string;
   appName: string;
   rewardCurrencyName: string;
   dailyClaimAmount?: string;
@@ -80,6 +82,8 @@ export function loadConfig(): NodeConfig {
     migrationsDir: process.env.MIGRATIONS_DIR ?? fileURLToPath(new URL("../../../migrations", import.meta.url)),
     publicAppUrl,
     discordBotToken: token,
+    discordApplicationId: process.env.DISCORD_APPLICATION_ID,
+    discordClientSecret: process.env.DISCORD_CLIENT_SECRET,
     appName: process.env.APP_NAME ?? "Holder Rewards",
     rewardCurrencyName: process.env.REWARD_CURRENCY_NAME ?? "Points",
     dailyClaimAmount: process.env.DAILY_CLAIM_AMOUNT,

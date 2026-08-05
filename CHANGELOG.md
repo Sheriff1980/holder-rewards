@@ -7,6 +7,8 @@ All notable changes to Holder Rewards will be documented here. The project follo
 ### Added
 
 - Self-hosted Node deployment path (`apps/node`): the full application runs on Windows or an Ubuntu VPS with Node 22+ over a local SQLite database, sharing the worker's code, migrations, and features. Includes a D1-compatible database shim, automatic migrations at startup, non-overlapping scheduled jobs, and complete Windows and VPS guides.
+- Optional hosted Discord OAuth onboarding: managers sign in, choose only servers they are allowed to manage, install the shared bot, and continue into the existing private manager without creating a bot or copying credentials.
+- Drip migration center with temporary read-only API access or CSV upload, conversion preview, duplicate-member consolidation, deterministic balance imports, audit history, retry protection, and exact rollback batches.
 
 ### Security
 

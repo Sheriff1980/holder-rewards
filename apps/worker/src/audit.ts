@@ -26,7 +26,9 @@ export type AuditAction =
   | "store_item_created"
   | "store_item_removed"
   | "sales_watch_created"
-  | "sales_watch_removed";
+  | "sales_watch_removed"
+  | "drip_migration_applied"
+  | "drip_migration_rolled_back";
 
 export async function recordAuditEvent(
   env: Env,

@@ -9,6 +9,8 @@ export interface Env {
   REWARD_CURRENCY_NAME: string;
   DAILY_CLAIM_AMOUNT?: string;
   DISCORD_BOT_TOKEN: string;
+  DISCORD_APPLICATION_ID?: string;
+  DISCORD_CLIENT_SECRET?: string;
   SETUP_TOKEN?: string;
   ROLE_SYNC_QUEUE?: Queue<RoleSyncQueueMessage>;
 }

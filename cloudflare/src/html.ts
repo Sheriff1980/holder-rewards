@@ -40,7 +40,7 @@ function page(title: string, body: string): string {
       .status.problem::before { background: #c83f3f; }
       .panel { margin-bottom: 20px; padding: 24px; background: #fff; border: 1px solid #d8dee5; border-radius: 8px; }
       label { display: block; margin: 18px 0 7px; font-weight: 650; }
-      input, select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #aeb8c2; border-radius: 6px; background: #fff; font: inherit; }
+      input, select, textarea { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #aeb8c2; border-radius: 6px; background: #fff; font: inherit; }
       button, .button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; margin-top: 12px; padding: 9px 15px; color: var(--accent-text); background: var(--accent); border: 0; border-radius: 6px; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
       button:disabled { opacity: .6; cursor: wait; }
       button.secondary { color: #1769c2; background: #fff; border: 1px solid #1769c2; }
@@ -92,13 +92,14 @@ function page(title: string, body: string): string {
       .activity-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; padding: 12px 0; border-bottom: 1px solid #d8dee5; }
       .activity-row span { display: block; }
       .activity-row time { color: #5e6b76; font-size: 13px; white-space: nowrap; }
+      .member-actions { width: min(240px, 42vw); }
       [hidden] { display: none !important; }
       .wallet-address { overflow-wrap: anywhere; }
       .qr-handoff { width: min(240px, 100%); margin: 16px auto 4px; }
       .qr-handoff img { display: block; width: 100%; aspect-ratio: 1; border: 1px solid #d8dee5; background: #fff; }
       details { margin-top: 22px; border-top: 1px solid #d8dee5; padding-top: 18px; }
       summary { color: #1769c2; font-weight: 700; cursor: pointer; }
-      @media (max-width: 560px) { #chain-list, .field-grid, .icon-editor, .rule-group-header { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .activity-row { grid-template-columns: 1fr; gap: 4px; } }
+      @media (max-width: 560px) { #chain-list, .field-grid, .icon-editor, .rule-group-header, .rule-row { grid-template-columns: 1fr; } .member-actions { width: 100%; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .activity-row { grid-template-columns: 1fr; gap: 4px; } }
     </style>
   </head>
   <body>${body}</body>
@@ -295,6 +296,114 @@ export function setupPage(env: Env, status: DiscordSetupStatus, advancedNetworks
   );
 }
 
+export function hostedOnboardingPage(env: Env): string {
+  const appName = escapeHtml(env.APP_NAME);
+  return page(
+    `${appName} Hosted Setup`,
+    `<header><strong>${appName}</strong></header>
+    <main>
+      <h1>Choose your community</h1>
+      <div id="hosted-status" class="status pending">Checking Discord sign-in...</div>
+      <section id="hosted-login" class="panel" hidden>
+        <h2>Hosted setup</h2>
+        <p>Sign in with Discord, choose a server you manage, and add the bot. No server, bot token, or command line is required.</p>
+        <a class="button" href="/hosted/login">Sign in with Discord</a>
+      </section>
+      <section id="hosted-communities" class="panel" hidden>
+        <h2>Your Discord servers</h2>
+        <p class="muted">Choose the community you want to configure.</p>
+        <div id="hosted-guild-list" class="rule-list"></div>
+        <a class="button secondary" href="/hosted/login">Refresh Discord access</a>
+      </section>
+    </main>
+    <script>
+      const status = document.getElementById("hosted-status");
+      const login = document.getElementById("hosted-login");
+      const communities = document.getElementById("hosted-communities");
+      const guildList = document.getElementById("hosted-guild-list");
+
+      async function chooseGuild(button, guildId) {
+        button.disabled = true;
+        try {
+          const response = await fetch("/api/hosted/select", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guildId })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "This community could not be opened.");
+          if (result.installed) {
+            location.assign(result.manageUrl);
+            return;
+          }
+          window.open(result.inviteUrl, "_blank", "noopener");
+          status.className = "status pending";
+          status.textContent = "Finish adding the bot in Discord, then press Continue again.";
+          button.textContent = "Continue";
+        } catch (error) {
+          status.className = "status problem";
+          status.textContent = error instanceof Error ? error.message : "This community could not be opened.";
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function initializeHosted() {
+        const callbackError = new URLSearchParams(location.search).get("error");
+        if (callbackError) {
+          history.replaceState(null, "", "/hosted");
+          status.className = "status problem";
+          status.textContent = callbackError;
+          login.hidden = false;
+          return;
+        }
+        const response = await fetch("/api/hosted/session", { headers: { Accept: "application/json" } });
+        if (response.status === 401) {
+          status.className = "status pending";
+          status.textContent = "Sign in to begin";
+          login.hidden = false;
+          return;
+        }
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Hosted setup is temporarily unavailable.");
+        status.className = "status";
+        status.textContent = "Discord is connected";
+        communities.hidden = false;
+        if (!result.guilds.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No Discord servers where you have Manage Server permission were found.";
+          guildList.append(empty);
+          return;
+        }
+        for (const guild of result.guilds) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const name = document.createElement("strong");
+          name.textContent = guild.name;
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          detail.textContent = "Discord server";
+          copy.append(name, detail);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Set up";
+          button.addEventListener("click", () => chooseGuild(button, guild.id));
+          row.append(copy, button);
+          guildList.append(row);
+        }
+      }
+
+      initializeHosted().catch((error) => {
+        status.className = "status problem";
+        status.textContent = error instanceof Error ? error.message : "Hosted setup is temporarily unavailable.";
+        login.hidden = false;
+      });
+    </script>`
+  );
+}
+
 export function managerPage(env: Env): string {
   const appName = escapeHtml(env.APP_NAME);
   return page(
@@ -379,6 +488,50 @@ export function managerPage(env: Env): string {
             <button class="secondary" type="button" data-export="audit">Audit history</button>
           </div>
           <div id="export-result" aria-live="polite"></div>
+        </section>
+        <section class="panel">
+          <h2>Move rewards from Drip</h2>
+          <p class="notice">This copies balances into Holder Rewards. Pause earning and spending in Drip before the final import so balances cannot change in both systems.</p>
+          <div class="button-row" role="tablist" aria-label="Drip migration source">
+            <button id="drip-api-tab" class="secondary" type="button" role="tab" aria-selected="true">Connect Drip</button>
+            <button id="drip-csv-tab" class="secondary" type="button" role="tab" aria-selected="false">Upload CSV</button>
+          </div>
+          <form id="drip-api-form">
+            <div class="field-grid">
+              <div>
+                <label for="drip-realm-id">Drip Realm ID</label>
+                <input id="drip-realm-id" maxlength="24" autocomplete="off" required>
+              </div>
+              <div>
+                <label for="drip-api-currency">Drip currency name or ID</label>
+                <input id="drip-api-currency" maxlength="64" required>
+              </div>
+            </div>
+            <label for="drip-api-key">Temporary read-only Drip API key</label>
+            <input id="drip-api-key" type="password" maxlength="500" autocomplete="off" required>
+            <label for="drip-api-ratio">Conversion ratio</label>
+            <input id="drip-api-ratio" type="number" min="0.000001" max="1000" step="0.000001" value="1" required>
+            <div class="form-actions"><button id="preview-drip-api" type="submit">Preview migration</button></div>
+          </form>
+          <form id="drip-csv-form" hidden>
+            <div class="field-grid">
+              <div>
+                <label for="drip-csv-file">Drip CSV file</label>
+                <input id="drip-csv-file" type="file" accept=".csv,text/csv" required>
+              </div>
+              <div>
+                <label for="drip-csv-currency">Drip currency name</label>
+                <input id="drip-csv-currency" maxlength="64" required>
+              </div>
+            </div>
+            <label for="drip-csv-ratio">Conversion ratio</label>
+            <input id="drip-csv-ratio" type="number" min="0.000001" max="1000" step="0.000001" value="1" required>
+            <div class="form-actions"><button id="preview-drip-csv" type="submit">Preview migration</button></div>
+          </form>
+          <div id="drip-migration-result" aria-live="polite"></div>
+          <div id="drip-migration-preview" class="rule-list"></div>
+          <h2>Migration history</h2>
+          <div id="drip-migration-history" class="rule-list"></div>
         </section>
         <section class="panel">
           <h2>Community rewards</h2>
@@ -496,6 +649,14 @@ export function managerPage(env: Env): string {
           <div id="rule-list" class="rule-list"></div>
         </section>
         <section class="panel">
+          <h2>Quest channel</h2>
+          <p class="muted">The bot posts a permanent Quest panel here and announces new quests automatically.</p>
+          <label for="quest-channel">Discord channel</label>
+          <select id="quest-channel"></select>
+          <div class="form-actions"><button id="save-quest-channel" type="button">Save and publish panel</button></div>
+          <div id="quest-channel-result" aria-live="polite"></div>
+        </section>
+        <section class="panel">
           <h2>Quests</h2>
           <form id="quest-form">
             <div class="field-grid">
@@ -542,6 +703,14 @@ export function managerPage(env: Env): string {
             <h2>Pending quest proofs</h2>
             <div id="submission-list" class="rule-list"></div>
           </div>
+        </section>
+        <section class="panel">
+          <h2>Store and raffle channel</h2>
+          <p class="muted">The bot posts permanent Store and Raffle panels here and announces new items and raffles automatically.</p>
+          <label for="rewards-channel">Discord channel</label>
+          <select id="rewards-channel"></select>
+          <div class="form-actions"><button id="save-rewards-channel" type="button">Save and publish panels</button></div>
+          <div id="rewards-channel-result" aria-live="polite"></div>
         </section>
         <section class="panel">
           <h2>Raffles</h2>
@@ -592,6 +761,10 @@ export function managerPage(env: Env): string {
               <div>
                 <label for="store-stock">Stock</label>
                 <input id="store-stock" type="number" min="1" max="10000" step="1" placeholder="Blank for unlimited">
+              </div>
+              <div>
+                <label for="store-purchase-limit">Maximum purchases per member</label>
+                <input id="store-purchase-limit" type="number" min="1" max="10000" step="1" placeholder="Blank for unlimited">
               </div>
             </div>
             <label for="store-description">Description</label>
@@ -690,6 +863,13 @@ export function managerPage(env: Env): string {
       const privacyResult = document.getElementById("privacy-result");
       const exportActions = document.getElementById("export-actions");
       const exportResult = document.getElementById("export-result");
+      const dripApiTab = document.getElementById("drip-api-tab");
+      const dripCsvTab = document.getElementById("drip-csv-tab");
+      const dripApiForm = document.getElementById("drip-api-form");
+      const dripCsvForm = document.getElementById("drip-csv-form");
+      const dripMigrationResult = document.getElementById("drip-migration-result");
+      const dripMigrationPreview = document.getElementById("drip-migration-preview");
+      const dripMigrationHistory = document.getElementById("drip-migration-history");
       const rewardsForm = document.getElementById("rewards-form");
       const rewardsResult = document.getElementById("rewards-result");
       const saveRewards = document.getElementById("save-rewards");
@@ -736,6 +916,12 @@ export function managerPage(env: Env): string {
       const questList = document.getElementById("quest-list");
       const submissionArea = document.getElementById("submission-area");
       const submissionList = document.getElementById("submission-list");
+      const questChannel = document.getElementById("quest-channel");
+      const saveQuestChannel = document.getElementById("save-quest-channel");
+      const questChannelResult = document.getElementById("quest-channel-result");
+      const rewardsChannel = document.getElementById("rewards-channel");
+      const saveRewardsChannel = document.getElementById("save-rewards-channel");
+      const rewardsChannelResult = document.getElementById("rewards-channel-result");
       const raffleForm = document.getElementById("raffle-form");
       const rafflePrizeRole = document.getElementById("raffle-prize-role");
       const saveRaffle = document.getElementById("save-raffle");
@@ -1539,6 +1725,48 @@ export function managerPage(env: Env): string {
         document.getElementById("quest-instructions").required = kind === "custom";
       }
 
+      function setQuestChannelOptions() {
+        questChannel.replaceChildren();
+        const prompt = document.createElement("option");
+        prompt.value = "";
+        prompt.textContent = data.channels && data.channels.length
+          ? "Choose a channel"
+          : "No text channels available";
+        questChannel.append(prompt);
+        for (const channel of data.channels || []) {
+          const option = document.createElement("option");
+          option.value = channel.id;
+          option.textContent = "#" + channel.name;
+          questChannel.append(option);
+        }
+        questChannel.value = data.questChannel?.channelId || "";
+      }
+
+      saveQuestChannel.addEventListener("click", async () => {
+        if (!questChannel.value) {
+          questChannelResult.className = "error";
+          questChannelResult.textContent = "Choose a Discord channel.";
+          return;
+        }
+        saveQuestChannel.disabled = true;
+        questChannelResult.className = "";
+        questChannelResult.textContent = "Publishing the Quest panel...";
+        try {
+          const saved = await api("quest-channel", {
+            method: "POST",
+            body: JSON.stringify({ channelId: questChannel.value })
+          });
+          data.questChannel = saved.questChannel;
+          questChannelResult.className = "success";
+          questChannelResult.textContent = "Panel published. New quests will be announced automatically.";
+        } catch (error) {
+          questChannelResult.className = "error";
+          questChannelResult.textContent = error instanceof Error ? error.message : "The Quest panel could not be published.";
+        } finally {
+          saveQuestChannel.disabled = false;
+        }
+      });
+
       function questSummary(quest) {
         if (quest.kind === "link_wallet") return "Link a wallet";
         if (quest.kind === "hold_role") {
@@ -1600,7 +1828,11 @@ export function managerPage(env: Env): string {
           questForm.reset();
           updateQuestFields();
           questResult.className = "success";
-          questResult.textContent = "Quest added. Members can see it with /quests.";
+          questResult.textContent = saved.announcementWarning
+            ? "Quest added, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Quest added and announced in the Quest channel."
+              : "Quest added. Choose a Quest channel to announce future quests.";
         } catch (error) {
           questResult.className = "error";
           questResult.textContent = error instanceof Error ? error.message : "Quest could not be added.";
@@ -1690,6 +1922,48 @@ export function managerPage(env: Env): string {
         }
       }
 
+      function setRewardsChannelOptions() {
+        rewardsChannel.replaceChildren();
+        const prompt = document.createElement("option");
+        prompt.value = "";
+        prompt.textContent = data.channels && data.channels.length
+          ? "Choose a channel"
+          : "No text channels available";
+        rewardsChannel.append(prompt);
+        for (const channel of data.channels || []) {
+          const option = document.createElement("option");
+          option.value = channel.id;
+          option.textContent = "#" + channel.name;
+          rewardsChannel.append(option);
+        }
+        rewardsChannel.value = data.rewardsChannel?.channelId || "";
+      }
+
+      saveRewardsChannel.addEventListener("click", async () => {
+        if (!rewardsChannel.value) {
+          rewardsChannelResult.className = "error";
+          rewardsChannelResult.textContent = "Choose a Discord channel.";
+          return;
+        }
+        saveRewardsChannel.disabled = true;
+        rewardsChannelResult.className = "";
+        rewardsChannelResult.textContent = "Publishing the Store and Raffle panels...";
+        try {
+          const saved = await api("rewards-channel", {
+            method: "POST",
+            body: JSON.stringify({ channelId: rewardsChannel.value })
+          });
+          data.rewardsChannel = saved.rewardsChannel;
+          rewardsChannelResult.className = "success";
+          rewardsChannelResult.textContent = "Panels published. New store items and raffles will be announced automatically.";
+        } catch (error) {
+          rewardsChannelResult.className = "error";
+          rewardsChannelResult.textContent = error instanceof Error ? error.message : "The panels could not be published.";
+        } finally {
+          saveRewardsChannel.disabled = false;
+        }
+      });
+
       function renderRaffles() {
         raffleList.replaceChildren();
         if (!data.raffles || !data.raffles.length) {
@@ -1751,7 +2025,11 @@ export function managerPage(env: Env): string {
           renderRaffles();
           raffleForm.reset();
           raffleResult.className = "success";
-          raffleResult.textContent = "Raffle open. Members enter with /raffle enter.";
+          raffleResult.textContent = saved.announcementWarning
+            ? "Raffle opened, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Raffle open and announced in the Store and Raffle channel."
+              : "Raffle open. Choose a Store and Raffle channel to announce future raffles.";
         } catch (error) {
           raffleResult.className = "error";
           raffleResult.textContent = error instanceof Error ? error.message : "Raffle could not be opened.";
@@ -1825,7 +2103,10 @@ export function managerPage(env: Env): string {
           const detail = document.createElement("span");
           detail.className = "muted";
           const stock = item.stock === null ? "unlimited stock" : item.stock + " left";
-          detail.textContent = stock + " - " + item.sold.toLocaleString() + " sold - id " + item.id.slice(0, 8) + (item.description ? " - " + item.description : "");
+          const memberLimit = item.purchaseLimitPerMember === null
+            ? "unlimited per member"
+            : "maximum " + item.purchaseLimitPerMember.toLocaleString() + " per member";
+          detail.textContent = stock + " - " + memberLimit + " - " + item.sold.toLocaleString() + " sold - id " + item.id.slice(0, 8) + (item.description ? " - " + item.description : "");
           copy.append(description, detail);
           const remove = document.createElement("button");
           remove.type = "button";
@@ -1876,14 +2157,19 @@ export function managerPage(env: Env): string {
               description: document.getElementById("store-description").value.trim() || undefined,
               price: document.getElementById("store-price").value,
               roleId: storeRole.value || undefined,
-              stock: document.getElementById("store-stock").value || undefined
+              stock: document.getElementById("store-stock").value || undefined,
+              purchaseLimitPerMember: document.getElementById("store-purchase-limit").value || undefined
             })
           });
           data.storeItems = (data.storeItems || []).concat(saved.item);
           renderStoreItems();
           storeForm.reset();
           storeResult.className = "success";
-          storeResult.textContent = "Item added. Members can buy it with /store buy.";
+          storeResult.textContent = saved.announcementWarning
+            ? "Item added, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Item added and announced in the Store and Raffle channel."
+              : "Item added. Choose a Store and Raffle channel to announce future items.";
         } catch (error) {
           storeResult.className = "error";
           storeResult.textContent = error instanceof Error ? error.message : "Item could not be added.";
@@ -1981,6 +2267,178 @@ export function managerPage(env: Env): string {
         }
       });
 
+      function selectDripSource(mode) {
+        const apiMode = mode === "api";
+        dripApiForm.hidden = !apiMode;
+        dripCsvForm.hidden = apiMode;
+        dripApiTab.setAttribute("aria-selected", String(apiMode));
+        dripCsvTab.setAttribute("aria-selected", String(!apiMode));
+      }
+
+      function migrationSummary(migration) {
+        return migration.matchedCount.toLocaleString() + " members, " +
+          migration.importTotal.toLocaleString() + " " + migration.targetCurrency +
+          (migration.skippedCount ? ", " + migration.skippedCount.toLocaleString() + " skipped" : "");
+      }
+
+      function renderMigrationPreview(migration) {
+        dripMigrationPreview.replaceChildren();
+        if (!migration) return;
+        const summary = document.createElement("div");
+        summary.className = "rule-row";
+        const copy = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = "Preview ready";
+        const detail = document.createElement("span");
+        detail.className = "muted";
+        detail.textContent = migrationSummary(migration) + " at " + migration.conversionRatio + ":1";
+        copy.append(title, detail);
+        const apply = document.createElement("button");
+        apply.type = "button";
+        apply.textContent = "Import balances";
+        apply.addEventListener("click", async () => {
+          apply.disabled = true;
+          try {
+            const saved = await api("migrations/drip/" + encodeURIComponent(migration.id) + "/apply", { method: "POST", body: "{}" });
+            dripMigrationResult.className = "success";
+            dripMigrationResult.textContent = "Imported " + migrationSummary(saved.migration) + ".";
+            renderMigrationPreview(null);
+            await loadMigrations();
+          } catch (error) {
+            dripMigrationResult.className = "error";
+            dripMigrationResult.textContent = error instanceof Error ? error.message : "The migration could not be applied.";
+            apply.disabled = false;
+          }
+        });
+        summary.append(copy, apply);
+        dripMigrationPreview.append(summary);
+
+        for (const row of (migration.rows || []).slice(0, 10)) {
+          const item = document.createElement("div");
+          item.className = "activity-row";
+          const rowCopy = document.createElement("div");
+          const user = document.createElement("strong");
+          user.textContent = row.discordUserId ? "Discord " + row.discordUserId : "Skipped row";
+          const amount = document.createElement("span");
+          amount.className = row.status === "skipped" ? "error" : "muted";
+          amount.textContent = row.status === "skipped"
+            ? (row.note || "This row cannot be imported.")
+            : row.sourceBalance.toLocaleString() + " becomes " + row.importAmount.toLocaleString();
+          rowCopy.append(user, amount);
+          item.append(rowCopy);
+          dripMigrationPreview.append(item);
+        }
+      }
+
+      function renderMigrationHistory(migrations) {
+        dripMigrationHistory.replaceChildren();
+        if (!migrations.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No migrations yet.";
+          dripMigrationHistory.append(empty);
+          return;
+        }
+        for (const migration of migrations) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = migration.status === "applied" ? "Imported" : migration.status === "rolled_back" ? "Rolled back" : "Preview";
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          detail.textContent = migrationSummary(migration) + " - " + new Date(migration.createdAt).toLocaleString();
+          copy.append(title, detail);
+          row.append(copy);
+          if (migration.status === "applied") {
+            const rollback = document.createElement("button");
+            rollback.type = "button";
+            rollback.textContent = "Roll back";
+            rollback.addEventListener("click", async () => {
+              rollback.disabled = true;
+              try {
+                await api("migrations/drip/" + encodeURIComponent(migration.id) + "/rollback", { method: "POST", body: "{}" });
+                dripMigrationResult.className = "success";
+                dripMigrationResult.textContent = "The migration was rolled back and recorded in the audit history.";
+                await loadMigrations();
+              } catch (error) {
+                dripMigrationResult.className = "error";
+                dripMigrationResult.textContent = error instanceof Error ? error.message : "The migration could not be rolled back.";
+                rollback.disabled = false;
+              }
+            });
+            row.append(rollback);
+          }
+          dripMigrationHistory.append(row);
+        }
+      }
+
+      async function loadMigrations() {
+        const result = await api("migrations/drip");
+        renderMigrationHistory(result.migrations || []);
+      }
+
+      dripApiTab.addEventListener("click", () => selectDripSource("api"));
+      dripCsvTab.addEventListener("click", () => selectDripSource("csv"));
+
+      dripApiForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = document.getElementById("preview-drip-api");
+        button.disabled = true;
+        dripMigrationResult.textContent = "Reading Drip balances...";
+        try {
+          const result = await api("migrations/drip/preview", {
+            method: "POST",
+            body: JSON.stringify({
+              mode: "api",
+              realmId: document.getElementById("drip-realm-id").value,
+              apiKey: document.getElementById("drip-api-key").value,
+              sourceCurrency: document.getElementById("drip-api-currency").value,
+              ratio: document.getElementById("drip-api-ratio").value
+            })
+          });
+          document.getElementById("drip-api-key").value = "";
+          dripMigrationResult.className = "success";
+          dripMigrationResult.textContent = "Preview created. The temporary Drip key was not saved.";
+          renderMigrationPreview(result.migration);
+          await loadMigrations();
+        } catch (error) {
+          dripMigrationResult.className = "error";
+          dripMigrationResult.textContent = error instanceof Error ? error.message : "Drip balances could not be previewed.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      dripCsvForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = document.getElementById("preview-drip-csv");
+        const file = document.getElementById("drip-csv-file").files[0];
+        if (!file) return;
+        button.disabled = true;
+        dripMigrationResult.textContent = "Reading the CSV file...";
+        try {
+          const result = await api("migrations/drip/preview", {
+            method: "POST",
+            body: JSON.stringify({
+              mode: "csv",
+              csv: await file.text(),
+              sourceCurrency: document.getElementById("drip-csv-currency").value,
+              ratio: document.getElementById("drip-csv-ratio").value
+            })
+          });
+          dripMigrationResult.className = "success";
+          dripMigrationResult.textContent = "Preview created. No balances have changed yet.";
+          renderMigrationPreview(result.migration);
+          await loadMigrations();
+        } catch (error) {
+          dripMigrationResult.className = "error";
+          dripMigrationResult.textContent = error instanceof Error ? error.message : "The CSV could not be previewed.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+
       async function initialize() {
         if (!token) throw new Error("This manager link is invalid or incomplete.");
         data = await api("session");
@@ -1988,10 +2446,12 @@ export function managerPage(env: Env): string {
         setOptions(chainInput, data.chains);
         setOptions(indexerChain, data.chains.filter((chain) => chain.family !== "mock"));
         setOptions(questRole, data.roles);
+        setQuestChannelOptions();
         renderIndexerForm();
         updateQuestFields();
         renderQuests();
         renderSubmissions();
+        setRewardsChannelOptions();
         setPrizeRoleOptions();
         renderRaffles();
         setStoreRoleOptions();
@@ -2000,6 +2460,8 @@ export function managerPage(env: Env): string {
         setOptions(salesChain, data.chains.filter((chain) => chain.family === "evm"));
         setOptions(salesChannel, data.channels || []);
         renderSalesWatches();
+        selectDripSource("api");
+        await loadMigrations();
         syncMatchModeForRole();
         document.getElementById("community-name").value = data.branding.name;
         document.getElementById("accent-color").value = data.branding.accentColor;
@@ -2029,6 +2491,253 @@ export function managerPage(env: Env): string {
         status.className = "status problem";
         status.textContent = error instanceof Error ? error.message : "The private manager could not be opened.";
       });
+    </script>`
+  );
+}
+
+export function memberRewardsPage(env: Env): string {
+  const appName = escapeHtml(env.APP_NAME);
+  return page(
+    `${appName} Community Rewards`,
+    `<header><strong id="community-name">${appName}</strong></header>
+    <main>
+      <div class="brand-heading">
+        <img id="currency-icon" class="currency-icon" alt="" hidden>
+        <div>
+          <h1>Community rewards</h1>
+          <div id="status" class="status pending">Opening your private rewards page...</div>
+        </div>
+      </div>
+      <div id="member-content" hidden>
+        <div class="panel">
+          <strong id="balance" style="font-size: 22px"></strong>
+          <span class="muted">Your current balance</span>
+          <div class="button-row" aria-label="Reward sections">
+            <button type="button" class="secondary" data-view="quests">Quests</button>
+            <button type="button" class="secondary" data-view="store">Store</button>
+            <button type="button" class="secondary" data-view="raffles">Raffles</button>
+          </div>
+        </div>
+        <div id="result" class="panel" aria-live="polite"></div>
+        <section id="quests-section" class="panel" hidden>
+          <h2>Quests</h2>
+          <div id="quests-list" class="rule-list"></div>
+        </section>
+        <section id="store-section" class="panel" hidden>
+          <h2>Store</h2>
+          <div id="store-list" class="rule-list"></div>
+        </section>
+        <section id="raffles-section" class="panel" hidden>
+          <h2>Raffles</h2>
+          <div id="raffles-list" class="rule-list"></div>
+        </section>
+      </div>
+    </main>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const suppliedToken = params.get("token");
+      if (suppliedToken) sessionStorage.setItem("memberRewardsToken", suppliedToken);
+      const token = suppliedToken || sessionStorage.getItem("memberRewardsToken") || "";
+      const requestedView = ["quests", "store", "raffles"].includes(params.get("view"))
+        ? params.get("view")
+        : "quests";
+      if (suppliedToken) history.replaceState(null, "", "/rewards?view=" + requestedView);
+
+      const status = document.getElementById("status");
+      const content = document.getElementById("member-content");
+      const result = document.getElementById("result");
+      let data;
+      let currentView = requestedView;
+
+      async function api(path, options = {}) {
+        const response = await fetch("/api/member/" + path, {
+          ...options,
+          headers: {
+            Authorization: "Bearer " + token,
+            ...(options.body ? { "Content-Type": "application/json" } : {})
+          }
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "This action could not be completed.");
+        return body;
+      }
+
+      function showResult(message, problem = false) {
+        result.style.display = "block";
+        result.className = "panel " + (problem ? "error" : "success");
+        result.textContent = message;
+      }
+
+      function emptyRow(message) {
+        const row = document.createElement("p");
+        row.className = "muted";
+        row.textContent = message;
+        return row;
+      }
+
+      function actionRow(title, detail) {
+        const row = document.createElement("div");
+        row.className = "rule-row";
+        const copy = document.createElement("div");
+        const heading = document.createElement("strong");
+        heading.textContent = title;
+        const description = document.createElement("span");
+        description.className = "muted";
+        description.textContent = detail;
+        copy.append(heading, description);
+        const actions = document.createElement("div");
+        actions.className = "member-actions";
+        row.append(copy, actions);
+        return { row, actions };
+      }
+
+      function renderQuests() {
+        const list = document.getElementById("quests-list");
+        list.replaceChildren();
+        if (!data.quests.length) return list.append(emptyRow("There are no quests available right now."));
+        for (const quest of data.quests) {
+          const state = quest.completed ? "Completed" : quest.pendingSubmission ? "Waiting for manager review" : quest.reward.toLocaleString() + " " + data.rewards.currencyName;
+          const { row, actions } = actionRow(quest.title, state);
+          if (!quest.completed && !quest.pendingSubmission) {
+            if (quest.kind === "code") {
+              const input = document.createElement("input");
+              input.placeholder = "Secret code";
+              input.maxLength = 100;
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = "Submit code";
+              button.addEventListener("click", () => runAction(button, "quests/code", { code: input.value }, "Code submitted."));
+              actions.append(input, button);
+            } else if (quest.kind === "custom") {
+              const input = document.createElement("textarea");
+              input.placeholder = quest.config.instructions || "Paste your proof link or description";
+              input.maxLength = 400;
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = "Submit proof";
+              button.addEventListener("click", () => runAction(button, "quests/" + encodeURIComponent(quest.id) + "/proof", { proof: input.value }, "Proof sent for manager review."));
+              actions.append(input, button);
+            } else {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = "Check quest";
+              button.addEventListener("click", () => runAction(button, "quests/" + encodeURIComponent(quest.id) + "/check", {}, "Quest checked."));
+              actions.append(button);
+            }
+          }
+          list.append(row);
+        }
+      }
+
+      function renderStore() {
+        const list = document.getElementById("store-list");
+        list.replaceChildren();
+        if (!data.storeItems.length) return list.append(emptyRow("There are no store items available right now."));
+        for (const item of data.storeItems) {
+          const stock = item.stock === null ? "Unlimited" : item.stock.toLocaleString() + " remaining";
+          const memberLimit = item.purchaseLimitPerMember === null
+            ? "No per-member limit"
+            : "You bought " + item.memberPurchases.toLocaleString() + " of " + item.purchaseLimitPerMember.toLocaleString();
+          const atMemberLimit = item.purchaseLimitPerMember !== null && item.memberPurchases >= item.purchaseLimitPerMember;
+          const { row, actions } = actionRow(item.title, item.description + (item.description ? " - " : "") + item.price.toLocaleString() + " " + data.rewards.currencyName + " - " + stock + " - " + memberLimit);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = item.stock === 0 ? "Sold out" : atMemberLimit ? "Limit reached" : "Buy";
+          button.disabled = item.stock === 0 || atMemberLimit;
+          button.addEventListener("click", () =>
+            runAction(button, "store/" + encodeURIComponent(item.id) + "/buy", {}, "Purchase complete.")
+          );
+          actions.append(button);
+          list.append(row);
+        }
+      }
+
+      function renderRaffles() {
+        const list = document.getElementById("raffles-list");
+        list.replaceChildren();
+        if (!data.raffles.length) return list.append(emptyRow("There are no open raffles right now."));
+        for (const raffle of data.raffles) {
+          const detail = raffle.prize + " - " + raffle.entryCost.toLocaleString() + " " + data.rewards.currencyName + " per entry - You have " + raffle.memberEntries.toLocaleString();
+          const { row, actions } = actionRow(raffle.title, detail);
+          const input = document.createElement("input");
+          input.type = "number";
+          input.min = "1";
+          input.max = String(Math.min(100, raffle.maxEntriesPerMember - raffle.memberEntries));
+          input.value = "1";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Enter raffle";
+          button.disabled = raffle.memberEntries >= raffle.maxEntriesPerMember;
+          button.addEventListener("click", () => {
+            const count = Number(input.value);
+            runAction(button, "raffles/" + encodeURIComponent(raffle.id) + "/enter", { count }, "Raffle entry added.");
+          });
+          actions.append(input, button);
+          list.append(row);
+        }
+      }
+
+      function showView(view) {
+        currentView = view;
+        history.replaceState(null, "", "/rewards?view=" + view);
+        for (const name of ["quests", "store", "raffles"]) {
+          document.getElementById(name + "-section").hidden = name !== view;
+          const button = document.querySelector('[data-view="' + name + '"]');
+          button.className = name === view ? "" : "secondary";
+        }
+      }
+
+      async function load() {
+        data = await api("session");
+        document.documentElement.style.setProperty("--accent", data.branding.accentColor);
+        document.getElementById("community-name").textContent = data.branding.name;
+        document.getElementById("balance").textContent = data.balance.toLocaleString() + " " + data.rewards.currencyName;
+        const icon = document.getElementById("currency-icon");
+        icon.src = "/assets/currency/" + data.guildId;
+        icon.onload = () => { icon.hidden = false; };
+        icon.onerror = () => { icon.hidden = true; };
+        renderQuests();
+        renderStore();
+        renderRaffles();
+        showView(currentView);
+        status.className = "status";
+        status.textContent = "Private rewards page is ready";
+        content.hidden = false;
+      }
+
+      async function runAction(button, path, body, successMessage) {
+        button.disabled = true;
+        try {
+          const outcome = await api(path, { method: "POST", body: JSON.stringify(body) });
+          const message = outcome.result === "not_met"
+            ? "That quest requirement has not been met yet."
+            : outcome.result === "already_completed"
+              ? "You already completed that quest."
+              : outcome.result === "no_match"
+                ? "That code did not match an available quest."
+                : successMessage;
+          showResult(message);
+          await load();
+        } catch (error) {
+          showResult(error instanceof Error ? error.message : "This action could not be completed.", true);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      document.querySelectorAll("[data-view]").forEach((button) => {
+        button.addEventListener("click", () => showView(button.dataset.view));
+      });
+
+      if (!token) {
+        status.className = "status problem";
+        status.textContent = "Return to Discord and open this page from the community rewards panel.";
+      } else {
+        load().catch((error) => {
+          status.className = "status problem";
+          status.textContent = error instanceof Error ? error.message : "Community rewards could not be opened.";
+        });
+      }
     </script>`
   );
 }

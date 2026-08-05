@@ -82,6 +82,8 @@ See [sales bot](docs/SALES.md) for collection sale posts.
 See [customization](docs/CUSTOMIZATION.md) for community branding and image storage.
 See [updates and recovery](docs/UPGRADES_AND_RECOVERY.md) for D1 migrations, backups, exports, and point-in-time restore.
 
+Operators building a shared managed service can use the optional [hosted SaaS onboarding and Drip migration guide](docs/HOSTED_SAAS.md). Self-hosted communities do not need the hosted OAuth settings.
+
 The [Cloudflare release notes](docs/CLOUDFLARE.md) are for project developers maintaining the public deployment template. They are not operator setup instructions.
 
 ### Self-Host On A Windows Computer

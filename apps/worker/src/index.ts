@@ -48,7 +48,7 @@ import {
   removeSalesWatch,
   SalesWatchError
 } from "./sales.js";
-import { managerPage, memberRewardsPage, setupPage, verifyPage } from "./html.js";
+import { hostedOnboardingPage, managerPage, memberRewardsPage, setupPage, verifyPage } from "./html.js";
 import type { DiscordInteraction, Env, RoleSyncQueueMessage } from "./types.js";
 import { AdminError, listManageableDiscordRoles, requireAdminSession } from "./admin.js";
 import {
@@ -103,6 +103,25 @@ import {
   getQuestChannelSettings,
   getRewardsChannelSettings
 } from "./announcements.js";
+import {
+  beginHostedLogin,
+  completeHostedLogin,
+  HostedOnboardingError,
+  hostedOnboardingEnabled,
+  hostedSessionCookie,
+  readHostedCookie,
+  requireHostedSession,
+  selectHostedGuild
+} from "./hosted.js";
+import {
+  applyDripMigration,
+  DripMigrationError,
+  getDripMigration,
+  listDripMigrations,
+  previewDripApi,
+  previewDripCsv,
+  rollbackDripMigration
+} from "./drip-migration.js";
 
 const securityHeaders = {
   "Content-Security-Policy":
@@ -464,6 +483,39 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         checkedAt: new Date().toISOString(),
         providers
       });
+    }
+
+    if (request.method === "GET" && path === "migrations/drip") {
+      return jsonResponse({ migrations: await listDripMigrations(env, session.guild_id) });
+    }
+
+    if (request.method === "GET" && path.startsWith("migrations/drip/")) {
+      const batchId = path.slice("migrations/drip/".length);
+      return jsonResponse({ migration: await getDripMigration(env, session.guild_id, batchId) });
+    }
+
+    if (request.method === "POST" && path === "migrations/drip/preview") {
+      const input = await request.json() as Record<string, unknown>;
+      const migration = input.mode === "api"
+        ? await previewDripApi(env, session.guild_id, session.discord_user_id, input)
+        : await previewDripCsv(env, session.guild_id, session.discord_user_id, input);
+      return jsonResponse({ ok: true, migration });
+    }
+
+    const applyMigrationMatch = /^migrations\/drip\/([^/]+)\/apply$/.exec(path);
+    if (request.method === "POST" && applyMigrationMatch) {
+      const migration = await applyDripMigration(
+        env, session.guild_id, session.discord_user_id, applyMigrationMatch[1]!
+      );
+      return jsonResponse({ ok: true, migration });
+    }
+
+    const rollbackMigrationMatch = /^migrations\/drip\/([^/]+)\/rollback$/.exec(path);
+    if (request.method === "POST" && rollbackMigrationMatch) {
+      const migration = await rollbackDripMigration(
+        env, session.guild_id, session.discord_user_id, rollbackMigrationMatch[1]!
+      );
+      return jsonResponse({ ok: true, migration });
     }
 
     if (request.method === "POST" && path === "rewards-channel") {
@@ -1019,6 +1071,9 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
     if (error instanceof AnnouncementError) {
       return jsonResponse({ error: error.message }, 400);
     }
+    if (error instanceof DripMigrationError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
     if (error instanceof SyntaxError) {
       return jsonResponse({ error: "Request body must be valid JSON." }, 400);
     }
@@ -1041,6 +1096,55 @@ export async function handleRequest(
 
   if (request.method === "GET" && url.pathname === "/") {
     return htmlResponse(setupPage(env, await ensureDiscordSetup(env, url.origin), Boolean(env.SETUP_TOKEN)));
+  }
+
+  if (request.method === "GET" && url.pathname === "/hosted") {
+    if (!hostedOnboardingEnabled(env)) return jsonResponse({ error: "Hosted onboarding is not enabled." }, 404);
+    return htmlResponse(hostedOnboardingPage(env));
+  }
+
+  if (request.method === "GET" && url.pathname === "/hosted/login") {
+    try {
+      return Response.redirect(await beginHostedLogin(env, url.origin), 302);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Discord sign-in could not start.";
+      return Response.redirect(`${url.origin}/hosted?error=${encodeURIComponent(message)}`, 302);
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/hosted/callback") {
+    try {
+      const session = await completeHostedLogin(
+        env, url.origin, url.searchParams.get("code"), url.searchParams.get("state")
+      );
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `${url.origin}/hosted`, "Set-Cookie": hostedSessionCookie(session.token), ...securityHeaders }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Discord sign-in could not finish.";
+      return Response.redirect(`${url.origin}/hosted?error=${encodeURIComponent(message)}`, 302);
+    }
+  }
+
+  if (url.pathname.startsWith("/api/hosted/")) {
+    try {
+      const token = readHostedCookie(request);
+      if (request.method === "GET" && url.pathname === "/api/hosted/session") {
+        const session = await requireHostedSession(env, token);
+        return privateJsonResponse({ guilds: session.guilds, expiresAt: session.expiresAt });
+      }
+      if (request.method === "POST" && url.pathname === "/api/hosted/select") {
+        const input = await request.json() as { guildId?: unknown };
+        return privateJsonResponse(await selectHostedGuild(env, token, input.guildId));
+      }
+      return privateJsonResponse({ error: "Not found" }, 404);
+    } catch (error) {
+      if (error instanceof HostedOnboardingError) return privateJsonResponse({ error: error.message }, error.status);
+      if (error instanceof SyntaxError) return privateJsonResponse({ error: "Request body must be valid JSON." }, 400);
+      console.error("Hosted onboarding failed", error);
+      return privateJsonResponse({ error: "Hosted setup is temporarily unavailable." }, 503);
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/health") {
@@ -1144,6 +1248,15 @@ export default {
       ),
       env.DB.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?").bind(
         new Date().toISOString()
+      ),
+      env.DB.prepare("DELETE FROM hosted_oauth_states WHERE expires_at <= ?").bind(
+        new Date().toISOString()
+      ),
+      env.DB.prepare("DELETE FROM hosted_sessions WHERE expires_at <= ?").bind(
+        new Date().toISOString()
+      ),
+      env.DB.prepare("DELETE FROM migration_batches WHERE status = 'preview' AND created_at <= ?").bind(
+        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
       ),
       env.DB.prepare(
         "INSERT INTO app_state (key, value, updated_at) VALUES ('last_scheduled_run', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP"

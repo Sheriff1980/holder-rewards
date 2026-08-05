@@ -296,6 +296,114 @@ export function setupPage(env: Env, status: DiscordSetupStatus, advancedNetworks
   );
 }
 
+export function hostedOnboardingPage(env: Env): string {
+  const appName = escapeHtml(env.APP_NAME);
+  return page(
+    `${appName} Hosted Setup`,
+    `<header><strong>${appName}</strong></header>
+    <main>
+      <h1>Choose your community</h1>
+      <div id="hosted-status" class="status pending">Checking Discord sign-in...</div>
+      <section id="hosted-login" class="panel" hidden>
+        <h2>Hosted setup</h2>
+        <p>Sign in with Discord, choose a server you manage, and add the bot. No server, bot token, or command line is required.</p>
+        <a class="button" href="/hosted/login">Sign in with Discord</a>
+      </section>
+      <section id="hosted-communities" class="panel" hidden>
+        <h2>Your Discord servers</h2>
+        <p class="muted">Choose the community you want to configure.</p>
+        <div id="hosted-guild-list" class="rule-list"></div>
+        <a class="button secondary" href="/hosted/login">Refresh Discord access</a>
+      </section>
+    </main>
+    <script>
+      const status = document.getElementById("hosted-status");
+      const login = document.getElementById("hosted-login");
+      const communities = document.getElementById("hosted-communities");
+      const guildList = document.getElementById("hosted-guild-list");
+
+      async function chooseGuild(button, guildId) {
+        button.disabled = true;
+        try {
+          const response = await fetch("/api/hosted/select", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guildId })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "This community could not be opened.");
+          if (result.installed) {
+            location.assign(result.manageUrl);
+            return;
+          }
+          window.open(result.inviteUrl, "_blank", "noopener");
+          status.className = "status pending";
+          status.textContent = "Finish adding the bot in Discord, then press Continue again.";
+          button.textContent = "Continue";
+        } catch (error) {
+          status.className = "status problem";
+          status.textContent = error instanceof Error ? error.message : "This community could not be opened.";
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function initializeHosted() {
+        const callbackError = new URLSearchParams(location.search).get("error");
+        if (callbackError) {
+          history.replaceState(null, "", "/hosted");
+          status.className = "status problem";
+          status.textContent = callbackError;
+          login.hidden = false;
+          return;
+        }
+        const response = await fetch("/api/hosted/session", { headers: { Accept: "application/json" } });
+        if (response.status === 401) {
+          status.className = "status pending";
+          status.textContent = "Sign in to begin";
+          login.hidden = false;
+          return;
+        }
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Hosted setup is temporarily unavailable.");
+        status.className = "status";
+        status.textContent = "Discord is connected";
+        communities.hidden = false;
+        if (!result.guilds.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No Discord servers where you have Manage Server permission were found.";
+          guildList.append(empty);
+          return;
+        }
+        for (const guild of result.guilds) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const name = document.createElement("strong");
+          name.textContent = guild.name;
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          detail.textContent = "Discord server";
+          copy.append(name, detail);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Set up";
+          button.addEventListener("click", () => chooseGuild(button, guild.id));
+          row.append(copy, button);
+          guildList.append(row);
+        }
+      }
+
+      initializeHosted().catch((error) => {
+        status.className = "status problem";
+        status.textContent = error instanceof Error ? error.message : "Hosted setup is temporarily unavailable.";
+        login.hidden = false;
+      });
+    </script>`
+  );
+}
+
 export function managerPage(env: Env): string {
   const appName = escapeHtml(env.APP_NAME);
   return page(
@@ -380,6 +488,50 @@ export function managerPage(env: Env): string {
             <button class="secondary" type="button" data-export="audit">Audit history</button>
           </div>
           <div id="export-result" aria-live="polite"></div>
+        </section>
+        <section class="panel">
+          <h2>Move rewards from Drip</h2>
+          <p class="notice">This copies balances into Holder Rewards. Pause earning and spending in Drip before the final import so balances cannot change in both systems.</p>
+          <div class="button-row" role="tablist" aria-label="Drip migration source">
+            <button id="drip-api-tab" class="secondary" type="button" role="tab" aria-selected="true">Connect Drip</button>
+            <button id="drip-csv-tab" class="secondary" type="button" role="tab" aria-selected="false">Upload CSV</button>
+          </div>
+          <form id="drip-api-form">
+            <div class="field-grid">
+              <div>
+                <label for="drip-realm-id">Drip Realm ID</label>
+                <input id="drip-realm-id" maxlength="24" autocomplete="off" required>
+              </div>
+              <div>
+                <label for="drip-api-currency">Drip currency name or ID</label>
+                <input id="drip-api-currency" maxlength="64" required>
+              </div>
+            </div>
+            <label for="drip-api-key">Temporary read-only Drip API key</label>
+            <input id="drip-api-key" type="password" maxlength="500" autocomplete="off" required>
+            <label for="drip-api-ratio">Conversion ratio</label>
+            <input id="drip-api-ratio" type="number" min="0.000001" max="1000" step="0.000001" value="1" required>
+            <div class="form-actions"><button id="preview-drip-api" type="submit">Preview migration</button></div>
+          </form>
+          <form id="drip-csv-form" hidden>
+            <div class="field-grid">
+              <div>
+                <label for="drip-csv-file">Drip CSV file</label>
+                <input id="drip-csv-file" type="file" accept=".csv,text/csv" required>
+              </div>
+              <div>
+                <label for="drip-csv-currency">Drip currency name</label>
+                <input id="drip-csv-currency" maxlength="64" required>
+              </div>
+            </div>
+            <label for="drip-csv-ratio">Conversion ratio</label>
+            <input id="drip-csv-ratio" type="number" min="0.000001" max="1000" step="0.000001" value="1" required>
+            <div class="form-actions"><button id="preview-drip-csv" type="submit">Preview migration</button></div>
+          </form>
+          <div id="drip-migration-result" aria-live="polite"></div>
+          <div id="drip-migration-preview" class="rule-list"></div>
+          <h2>Migration history</h2>
+          <div id="drip-migration-history" class="rule-list"></div>
         </section>
         <section class="panel">
           <h2>Community rewards</h2>
@@ -711,6 +863,13 @@ export function managerPage(env: Env): string {
       const privacyResult = document.getElementById("privacy-result");
       const exportActions = document.getElementById("export-actions");
       const exportResult = document.getElementById("export-result");
+      const dripApiTab = document.getElementById("drip-api-tab");
+      const dripCsvTab = document.getElementById("drip-csv-tab");
+      const dripApiForm = document.getElementById("drip-api-form");
+      const dripCsvForm = document.getElementById("drip-csv-form");
+      const dripMigrationResult = document.getElementById("drip-migration-result");
+      const dripMigrationPreview = document.getElementById("drip-migration-preview");
+      const dripMigrationHistory = document.getElementById("drip-migration-history");
       const rewardsForm = document.getElementById("rewards-form");
       const rewardsResult = document.getElementById("rewards-result");
       const saveRewards = document.getElementById("save-rewards");
@@ -2108,6 +2267,178 @@ export function managerPage(env: Env): string {
         }
       });
 
+      function selectDripSource(mode) {
+        const apiMode = mode === "api";
+        dripApiForm.hidden = !apiMode;
+        dripCsvForm.hidden = apiMode;
+        dripApiTab.setAttribute("aria-selected", String(apiMode));
+        dripCsvTab.setAttribute("aria-selected", String(!apiMode));
+      }
+
+      function migrationSummary(migration) {
+        return migration.matchedCount.toLocaleString() + " members, " +
+          migration.importTotal.toLocaleString() + " " + migration.targetCurrency +
+          (migration.skippedCount ? ", " + migration.skippedCount.toLocaleString() + " skipped" : "");
+      }
+
+      function renderMigrationPreview(migration) {
+        dripMigrationPreview.replaceChildren();
+        if (!migration) return;
+        const summary = document.createElement("div");
+        summary.className = "rule-row";
+        const copy = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = "Preview ready";
+        const detail = document.createElement("span");
+        detail.className = "muted";
+        detail.textContent = migrationSummary(migration) + " at " + migration.conversionRatio + ":1";
+        copy.append(title, detail);
+        const apply = document.createElement("button");
+        apply.type = "button";
+        apply.textContent = "Import balances";
+        apply.addEventListener("click", async () => {
+          apply.disabled = true;
+          try {
+            const saved = await api("migrations/drip/" + encodeURIComponent(migration.id) + "/apply", { method: "POST", body: "{}" });
+            dripMigrationResult.className = "success";
+            dripMigrationResult.textContent = "Imported " + migrationSummary(saved.migration) + ".";
+            renderMigrationPreview(null);
+            await loadMigrations();
+          } catch (error) {
+            dripMigrationResult.className = "error";
+            dripMigrationResult.textContent = error instanceof Error ? error.message : "The migration could not be applied.";
+            apply.disabled = false;
+          }
+        });
+        summary.append(copy, apply);
+        dripMigrationPreview.append(summary);
+
+        for (const row of (migration.rows || []).slice(0, 10)) {
+          const item = document.createElement("div");
+          item.className = "activity-row";
+          const rowCopy = document.createElement("div");
+          const user = document.createElement("strong");
+          user.textContent = row.discordUserId ? "Discord " + row.discordUserId : "Skipped row";
+          const amount = document.createElement("span");
+          amount.className = row.status === "skipped" ? "error" : "muted";
+          amount.textContent = row.status === "skipped"
+            ? (row.note || "This row cannot be imported.")
+            : row.sourceBalance.toLocaleString() + " becomes " + row.importAmount.toLocaleString();
+          rowCopy.append(user, amount);
+          item.append(rowCopy);
+          dripMigrationPreview.append(item);
+        }
+      }
+
+      function renderMigrationHistory(migrations) {
+        dripMigrationHistory.replaceChildren();
+        if (!migrations.length) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "No migrations yet.";
+          dripMigrationHistory.append(empty);
+          return;
+        }
+        for (const migration of migrations) {
+          const row = document.createElement("div");
+          row.className = "rule-row";
+          const copy = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = migration.status === "applied" ? "Imported" : migration.status === "rolled_back" ? "Rolled back" : "Preview";
+          const detail = document.createElement("span");
+          detail.className = "muted";
+          detail.textContent = migrationSummary(migration) + " - " + new Date(migration.createdAt).toLocaleString();
+          copy.append(title, detail);
+          row.append(copy);
+          if (migration.status === "applied") {
+            const rollback = document.createElement("button");
+            rollback.type = "button";
+            rollback.textContent = "Roll back";
+            rollback.addEventListener("click", async () => {
+              rollback.disabled = true;
+              try {
+                await api("migrations/drip/" + encodeURIComponent(migration.id) + "/rollback", { method: "POST", body: "{}" });
+                dripMigrationResult.className = "success";
+                dripMigrationResult.textContent = "The migration was rolled back and recorded in the audit history.";
+                await loadMigrations();
+              } catch (error) {
+                dripMigrationResult.className = "error";
+                dripMigrationResult.textContent = error instanceof Error ? error.message : "The migration could not be rolled back.";
+                rollback.disabled = false;
+              }
+            });
+            row.append(rollback);
+          }
+          dripMigrationHistory.append(row);
+        }
+      }
+
+      async function loadMigrations() {
+        const result = await api("migrations/drip");
+        renderMigrationHistory(result.migrations || []);
+      }
+
+      dripApiTab.addEventListener("click", () => selectDripSource("api"));
+      dripCsvTab.addEventListener("click", () => selectDripSource("csv"));
+
+      dripApiForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = document.getElementById("preview-drip-api");
+        button.disabled = true;
+        dripMigrationResult.textContent = "Reading Drip balances...";
+        try {
+          const result = await api("migrations/drip/preview", {
+            method: "POST",
+            body: JSON.stringify({
+              mode: "api",
+              realmId: document.getElementById("drip-realm-id").value,
+              apiKey: document.getElementById("drip-api-key").value,
+              sourceCurrency: document.getElementById("drip-api-currency").value,
+              ratio: document.getElementById("drip-api-ratio").value
+            })
+          });
+          document.getElementById("drip-api-key").value = "";
+          dripMigrationResult.className = "success";
+          dripMigrationResult.textContent = "Preview created. The temporary Drip key was not saved.";
+          renderMigrationPreview(result.migration);
+          await loadMigrations();
+        } catch (error) {
+          dripMigrationResult.className = "error";
+          dripMigrationResult.textContent = error instanceof Error ? error.message : "Drip balances could not be previewed.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      dripCsvForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = document.getElementById("preview-drip-csv");
+        const file = document.getElementById("drip-csv-file").files[0];
+        if (!file) return;
+        button.disabled = true;
+        dripMigrationResult.textContent = "Reading the CSV file...";
+        try {
+          const result = await api("migrations/drip/preview", {
+            method: "POST",
+            body: JSON.stringify({
+              mode: "csv",
+              csv: await file.text(),
+              sourceCurrency: document.getElementById("drip-csv-currency").value,
+              ratio: document.getElementById("drip-csv-ratio").value
+            })
+          });
+          dripMigrationResult.className = "success";
+          dripMigrationResult.textContent = "Preview created. No balances have changed yet.";
+          renderMigrationPreview(result.migration);
+          await loadMigrations();
+        } catch (error) {
+          dripMigrationResult.className = "error";
+          dripMigrationResult.textContent = error instanceof Error ? error.message : "The CSV could not be previewed.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+
       async function initialize() {
         if (!token) throw new Error("This manager link is invalid or incomplete.");
         data = await api("session");
@@ -2129,6 +2460,8 @@ export function managerPage(env: Env): string {
         setOptions(salesChain, data.chains.filter((chain) => chain.family === "evm"));
         setOptions(salesChannel, data.channels || []);
         renderSalesWatches();
+        selectDripSource("api");
+        await loadMigrations();
         syncMatchModeForRole();
         document.getElementById("community-name").value = data.branding.name;
         document.getElementById("accent-color").value = data.branding.accentColor;

@@ -22,6 +22,8 @@ const env: Env = {
   REWARD_CURRENCY_NAME: config.rewardCurrencyName,
   DAILY_CLAIM_AMOUNT: config.dailyClaimAmount,
   DISCORD_BOT_TOKEN: config.discordBotToken,
+  DISCORD_APPLICATION_ID: config.discordApplicationId,
+  DISCORD_CLIENT_SECRET: config.discordClientSecret,
   SETUP_TOKEN: config.setupToken
 };
 

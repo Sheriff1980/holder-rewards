@@ -1,2 +1,6 @@
 # Discord Developer Portal > Bot > Token
 DISCORD_BOT_TOKEN=replace-me
+
+# Optional: enables shared hosted onboarding at /hosted.
+# DISCORD_APPLICATION_ID=
+# DISCORD_CLIENT_SECRET=

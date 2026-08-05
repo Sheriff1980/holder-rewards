@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "bs58": "^6.0.0",
+    "csv-parse": "^6.1.0",
     "tweetnacl": "^1.0.3",
     "uqr": "^0.1.3",
     "viem": "^2.37.5"
