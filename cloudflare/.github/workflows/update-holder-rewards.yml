@@ -35,8 +35,10 @@ jobs:
       - name: Download the release source
         shell: bash
         run: |
+          rm -rf "${RUNNER_TEMP}/holder-rewards-upstream"
           git clone --depth 1 --branch "${{ steps.release.outputs.tag }}" \
-            https://github.com/Sheriff1980/holder-rewards.git upstream
+            https://github.com/Sheriff1980/holder-rewards.git \
+            "${RUNNER_TEMP}/holder-rewards-upstream"
 
       - name: Synchronize the standalone Cloudflare app
         shell: bash
@@ -46,8 +48,7 @@ jobs:
             --exclude ".wrangler/" \
             --exclude "node_modules/" \
             --exclude "dist/" \
-            upstream/cloudflare/ ./
-          rm -rf upstream
+            "${RUNNER_TEMP}/holder-rewards-upstream/cloudflare/" ./
 
       - name: Publish the update
         shell: bash
