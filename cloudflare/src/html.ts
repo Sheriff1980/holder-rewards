@@ -40,7 +40,7 @@ function page(title: string, body: string): string {
       .status.problem::before { background: #c83f3f; }
       .panel { margin-bottom: 20px; padding: 24px; background: #fff; border: 1px solid #d8dee5; border-radius: 8px; }
       label { display: block; margin: 18px 0 7px; font-weight: 650; }
-      input, select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #aeb8c2; border-radius: 6px; background: #fff; font: inherit; }
+      input, select, textarea { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #aeb8c2; border-radius: 6px; background: #fff; font: inherit; }
       button, .button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; margin-top: 12px; padding: 9px 15px; color: var(--accent-text); background: var(--accent); border: 0; border-radius: 6px; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
       button:disabled { opacity: .6; cursor: wait; }
       button.secondary { color: #1769c2; background: #fff; border: 1px solid #1769c2; }
@@ -92,13 +92,14 @@ function page(title: string, body: string): string {
       .activity-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; padding: 12px 0; border-bottom: 1px solid #d8dee5; }
       .activity-row span { display: block; }
       .activity-row time { color: #5e6b76; font-size: 13px; white-space: nowrap; }
+      .member-actions { width: min(240px, 42vw); }
       [hidden] { display: none !important; }
       .wallet-address { overflow-wrap: anywhere; }
       .qr-handoff { width: min(240px, 100%); margin: 16px auto 4px; }
       .qr-handoff img { display: block; width: 100%; aspect-ratio: 1; border: 1px solid #d8dee5; background: #fff; }
       details { margin-top: 22px; border-top: 1px solid #d8dee5; padding-top: 18px; }
       summary { color: #1769c2; font-weight: 700; cursor: pointer; }
-      @media (max-width: 560px) { #chain-list, .field-grid, .icon-editor, .rule-group-header { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .activity-row { grid-template-columns: 1fr; gap: 4px; } }
+      @media (max-width: 560px) { #chain-list, .field-grid, .icon-editor, .rule-group-header, .rule-row { grid-template-columns: 1fr; } .member-actions { width: 100%; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .activity-row { grid-template-columns: 1fr; gap: 4px; } }
     </style>
   </head>
   <body>${body}</body>
@@ -496,6 +497,14 @@ export function managerPage(env: Env): string {
           <div id="rule-list" class="rule-list"></div>
         </section>
         <section class="panel">
+          <h2>Quest channel</h2>
+          <p class="muted">The bot posts a permanent Quest panel here and announces new quests automatically.</p>
+          <label for="quest-channel">Discord channel</label>
+          <select id="quest-channel"></select>
+          <div class="form-actions"><button id="save-quest-channel" type="button">Save and publish panel</button></div>
+          <div id="quest-channel-result" aria-live="polite"></div>
+        </section>
+        <section class="panel">
           <h2>Quests</h2>
           <form id="quest-form">
             <div class="field-grid">
@@ -542,6 +551,14 @@ export function managerPage(env: Env): string {
             <h2>Pending quest proofs</h2>
             <div id="submission-list" class="rule-list"></div>
           </div>
+        </section>
+        <section class="panel">
+          <h2>Store and raffle channel</h2>
+          <p class="muted">The bot posts permanent Store and Raffle panels here and announces new items and raffles automatically.</p>
+          <label for="rewards-channel">Discord channel</label>
+          <select id="rewards-channel"></select>
+          <div class="form-actions"><button id="save-rewards-channel" type="button">Save and publish panels</button></div>
+          <div id="rewards-channel-result" aria-live="polite"></div>
         </section>
         <section class="panel">
           <h2>Raffles</h2>
@@ -592,6 +609,10 @@ export function managerPage(env: Env): string {
               <div>
                 <label for="store-stock">Stock</label>
                 <input id="store-stock" type="number" min="1" max="10000" step="1" placeholder="Blank for unlimited">
+              </div>
+              <div>
+                <label for="store-purchase-limit">Maximum purchases per member</label>
+                <input id="store-purchase-limit" type="number" min="1" max="10000" step="1" placeholder="Blank for unlimited">
               </div>
             </div>
             <label for="store-description">Description</label>
@@ -736,6 +757,12 @@ export function managerPage(env: Env): string {
       const questList = document.getElementById("quest-list");
       const submissionArea = document.getElementById("submission-area");
       const submissionList = document.getElementById("submission-list");
+      const questChannel = document.getElementById("quest-channel");
+      const saveQuestChannel = document.getElementById("save-quest-channel");
+      const questChannelResult = document.getElementById("quest-channel-result");
+      const rewardsChannel = document.getElementById("rewards-channel");
+      const saveRewardsChannel = document.getElementById("save-rewards-channel");
+      const rewardsChannelResult = document.getElementById("rewards-channel-result");
       const raffleForm = document.getElementById("raffle-form");
       const rafflePrizeRole = document.getElementById("raffle-prize-role");
       const saveRaffle = document.getElementById("save-raffle");
@@ -1539,6 +1566,48 @@ export function managerPage(env: Env): string {
         document.getElementById("quest-instructions").required = kind === "custom";
       }
 
+      function setQuestChannelOptions() {
+        questChannel.replaceChildren();
+        const prompt = document.createElement("option");
+        prompt.value = "";
+        prompt.textContent = data.channels && data.channels.length
+          ? "Choose a channel"
+          : "No text channels available";
+        questChannel.append(prompt);
+        for (const channel of data.channels || []) {
+          const option = document.createElement("option");
+          option.value = channel.id;
+          option.textContent = "#" + channel.name;
+          questChannel.append(option);
+        }
+        questChannel.value = data.questChannel?.channelId || "";
+      }
+
+      saveQuestChannel.addEventListener("click", async () => {
+        if (!questChannel.value) {
+          questChannelResult.className = "error";
+          questChannelResult.textContent = "Choose a Discord channel.";
+          return;
+        }
+        saveQuestChannel.disabled = true;
+        questChannelResult.className = "";
+        questChannelResult.textContent = "Publishing the Quest panel...";
+        try {
+          const saved = await api("quest-channel", {
+            method: "POST",
+            body: JSON.stringify({ channelId: questChannel.value })
+          });
+          data.questChannel = saved.questChannel;
+          questChannelResult.className = "success";
+          questChannelResult.textContent = "Panel published. New quests will be announced automatically.";
+        } catch (error) {
+          questChannelResult.className = "error";
+          questChannelResult.textContent = error instanceof Error ? error.message : "The Quest panel could not be published.";
+        } finally {
+          saveQuestChannel.disabled = false;
+        }
+      });
+
       function questSummary(quest) {
         if (quest.kind === "link_wallet") return "Link a wallet";
         if (quest.kind === "hold_role") {
@@ -1600,7 +1669,11 @@ export function managerPage(env: Env): string {
           questForm.reset();
           updateQuestFields();
           questResult.className = "success";
-          questResult.textContent = "Quest added. Members can see it with /quests.";
+          questResult.textContent = saved.announcementWarning
+            ? "Quest added, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Quest added and announced in the Quest channel."
+              : "Quest added. Choose a Quest channel to announce future quests.";
         } catch (error) {
           questResult.className = "error";
           questResult.textContent = error instanceof Error ? error.message : "Quest could not be added.";
@@ -1690,6 +1763,48 @@ export function managerPage(env: Env): string {
         }
       }
 
+      function setRewardsChannelOptions() {
+        rewardsChannel.replaceChildren();
+        const prompt = document.createElement("option");
+        prompt.value = "";
+        prompt.textContent = data.channels && data.channels.length
+          ? "Choose a channel"
+          : "No text channels available";
+        rewardsChannel.append(prompt);
+        for (const channel of data.channels || []) {
+          const option = document.createElement("option");
+          option.value = channel.id;
+          option.textContent = "#" + channel.name;
+          rewardsChannel.append(option);
+        }
+        rewardsChannel.value = data.rewardsChannel?.channelId || "";
+      }
+
+      saveRewardsChannel.addEventListener("click", async () => {
+        if (!rewardsChannel.value) {
+          rewardsChannelResult.className = "error";
+          rewardsChannelResult.textContent = "Choose a Discord channel.";
+          return;
+        }
+        saveRewardsChannel.disabled = true;
+        rewardsChannelResult.className = "";
+        rewardsChannelResult.textContent = "Publishing the Store and Raffle panels...";
+        try {
+          const saved = await api("rewards-channel", {
+            method: "POST",
+            body: JSON.stringify({ channelId: rewardsChannel.value })
+          });
+          data.rewardsChannel = saved.rewardsChannel;
+          rewardsChannelResult.className = "success";
+          rewardsChannelResult.textContent = "Panels published. New store items and raffles will be announced automatically.";
+        } catch (error) {
+          rewardsChannelResult.className = "error";
+          rewardsChannelResult.textContent = error instanceof Error ? error.message : "The panels could not be published.";
+        } finally {
+          saveRewardsChannel.disabled = false;
+        }
+      });
+
       function renderRaffles() {
         raffleList.replaceChildren();
         if (!data.raffles || !data.raffles.length) {
@@ -1751,7 +1866,11 @@ export function managerPage(env: Env): string {
           renderRaffles();
           raffleForm.reset();
           raffleResult.className = "success";
-          raffleResult.textContent = "Raffle open. Members enter with /raffle enter.";
+          raffleResult.textContent = saved.announcementWarning
+            ? "Raffle opened, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Raffle open and announced in the Store and Raffle channel."
+              : "Raffle open. Choose a Store and Raffle channel to announce future raffles.";
         } catch (error) {
           raffleResult.className = "error";
           raffleResult.textContent = error instanceof Error ? error.message : "Raffle could not be opened.";
@@ -1825,7 +1944,10 @@ export function managerPage(env: Env): string {
           const detail = document.createElement("span");
           detail.className = "muted";
           const stock = item.stock === null ? "unlimited stock" : item.stock + " left";
-          detail.textContent = stock + " - " + item.sold.toLocaleString() + " sold - id " + item.id.slice(0, 8) + (item.description ? " - " + item.description : "");
+          const memberLimit = item.purchaseLimitPerMember === null
+            ? "unlimited per member"
+            : "maximum " + item.purchaseLimitPerMember.toLocaleString() + " per member";
+          detail.textContent = stock + " - " + memberLimit + " - " + item.sold.toLocaleString() + " sold - id " + item.id.slice(0, 8) + (item.description ? " - " + item.description : "");
           copy.append(description, detail);
           const remove = document.createElement("button");
           remove.type = "button";
@@ -1876,14 +1998,19 @@ export function managerPage(env: Env): string {
               description: document.getElementById("store-description").value.trim() || undefined,
               price: document.getElementById("store-price").value,
               roleId: storeRole.value || undefined,
-              stock: document.getElementById("store-stock").value || undefined
+              stock: document.getElementById("store-stock").value || undefined,
+              purchaseLimitPerMember: document.getElementById("store-purchase-limit").value || undefined
             })
           });
           data.storeItems = (data.storeItems || []).concat(saved.item);
           renderStoreItems();
           storeForm.reset();
           storeResult.className = "success";
-          storeResult.textContent = "Item added. Members can buy it with /store buy.";
+          storeResult.textContent = saved.announcementWarning
+            ? "Item added, but the announcement needs attention: " + saved.announcementWarning
+            : saved.announcementPosted
+              ? "Item added and announced in the Store and Raffle channel."
+              : "Item added. Choose a Store and Raffle channel to announce future items.";
         } catch (error) {
           storeResult.className = "error";
           storeResult.textContent = error instanceof Error ? error.message : "Item could not be added.";
@@ -1988,10 +2115,12 @@ export function managerPage(env: Env): string {
         setOptions(chainInput, data.chains);
         setOptions(indexerChain, data.chains.filter((chain) => chain.family !== "mock"));
         setOptions(questRole, data.roles);
+        setQuestChannelOptions();
         renderIndexerForm();
         updateQuestFields();
         renderQuests();
         renderSubmissions();
+        setRewardsChannelOptions();
         setPrizeRoleOptions();
         renderRaffles();
         setStoreRoleOptions();
@@ -2029,6 +2158,253 @@ export function managerPage(env: Env): string {
         status.className = "status problem";
         status.textContent = error instanceof Error ? error.message : "The private manager could not be opened.";
       });
+    </script>`
+  );
+}
+
+export function memberRewardsPage(env: Env): string {
+  const appName = escapeHtml(env.APP_NAME);
+  return page(
+    `${appName} Community Rewards`,
+    `<header><strong id="community-name">${appName}</strong></header>
+    <main>
+      <div class="brand-heading">
+        <img id="currency-icon" class="currency-icon" alt="" hidden>
+        <div>
+          <h1>Community rewards</h1>
+          <div id="status" class="status pending">Opening your private rewards page...</div>
+        </div>
+      </div>
+      <div id="member-content" hidden>
+        <div class="panel">
+          <strong id="balance" style="font-size: 22px"></strong>
+          <span class="muted">Your current balance</span>
+          <div class="button-row" aria-label="Reward sections">
+            <button type="button" class="secondary" data-view="quests">Quests</button>
+            <button type="button" class="secondary" data-view="store">Store</button>
+            <button type="button" class="secondary" data-view="raffles">Raffles</button>
+          </div>
+        </div>
+        <div id="result" class="panel" aria-live="polite"></div>
+        <section id="quests-section" class="panel" hidden>
+          <h2>Quests</h2>
+          <div id="quests-list" class="rule-list"></div>
+        </section>
+        <section id="store-section" class="panel" hidden>
+          <h2>Store</h2>
+          <div id="store-list" class="rule-list"></div>
+        </section>
+        <section id="raffles-section" class="panel" hidden>
+          <h2>Raffles</h2>
+          <div id="raffles-list" class="rule-list"></div>
+        </section>
+      </div>
+    </main>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const suppliedToken = params.get("token");
+      if (suppliedToken) sessionStorage.setItem("memberRewardsToken", suppliedToken);
+      const token = suppliedToken || sessionStorage.getItem("memberRewardsToken") || "";
+      const requestedView = ["quests", "store", "raffles"].includes(params.get("view"))
+        ? params.get("view")
+        : "quests";
+      if (suppliedToken) history.replaceState(null, "", "/rewards?view=" + requestedView);
+
+      const status = document.getElementById("status");
+      const content = document.getElementById("member-content");
+      const result = document.getElementById("result");
+      let data;
+      let currentView = requestedView;
+
+      async function api(path, options = {}) {
+        const response = await fetch("/api/member/" + path, {
+          ...options,
+          headers: {
+            Authorization: "Bearer " + token,
+            ...(options.body ? { "Content-Type": "application/json" } : {})
+          }
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "This action could not be completed.");
+        return body;
+      }
+
+      function showResult(message, problem = false) {
+        result.style.display = "block";
+        result.className = "panel " + (problem ? "error" : "success");
+        result.textContent = message;
+      }
+
+      function emptyRow(message) {
+        const row = document.createElement("p");
+        row.className = "muted";
+        row.textContent = message;
+        return row;
+      }
+
+      function actionRow(title, detail) {
+        const row = document.createElement("div");
+        row.className = "rule-row";
+        const copy = document.createElement("div");
+        const heading = document.createElement("strong");
+        heading.textContent = title;
+        const description = document.createElement("span");
+        description.className = "muted";
+        description.textContent = detail;
+        copy.append(heading, description);
+        const actions = document.createElement("div");
+        actions.className = "member-actions";
+        row.append(copy, actions);
+        return { row, actions };
+      }
+
+      function renderQuests() {
+        const list = document.getElementById("quests-list");
+        list.replaceChildren();
+        if (!data.quests.length) return list.append(emptyRow("There are no quests available right now."));
+        for (const quest of data.quests) {
+          const state = quest.completed ? "Completed" : quest.pendingSubmission ? "Waiting for manager review" : quest.reward.toLocaleString() + " " + data.rewards.currencyName;
+          const { row, actions } = actionRow(quest.title, state);
+          if (!quest.completed && !quest.pendingSubmission) {
+            if (quest.kind === "code") {
+              const input = document.createElement("input");
+              input.placeholder = "Secret code";
+              input.maxLength = 100;
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = "Submit code";
+              button.addEventListener("click", () => runAction(button, "quests/code", { code: input.value }, "Code submitted."));
+              actions.append(input, button);
+            } else if (quest.kind === "custom") {
+              const input = document.createElement("textarea");
+              input.placeholder = quest.config.instructions || "Paste your proof link or description";
+              input.maxLength = 400;
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = "Submit proof";
+              button.addEventListener("click", () => runAction(button, "quests/" + encodeURIComponent(quest.id) + "/proof", { proof: input.value }, "Proof sent for manager review."));
+              actions.append(input, button);
+            } else {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = "Check quest";
+              button.addEventListener("click", () => runAction(button, "quests/" + encodeURIComponent(quest.id) + "/check", {}, "Quest checked."));
+              actions.append(button);
+            }
+          }
+          list.append(row);
+        }
+      }
+
+      function renderStore() {
+        const list = document.getElementById("store-list");
+        list.replaceChildren();
+        if (!data.storeItems.length) return list.append(emptyRow("There are no store items available right now."));
+        for (const item of data.storeItems) {
+          const stock = item.stock === null ? "Unlimited" : item.stock.toLocaleString() + " remaining";
+          const memberLimit = item.purchaseLimitPerMember === null
+            ? "No per-member limit"
+            : "You bought " + item.memberPurchases.toLocaleString() + " of " + item.purchaseLimitPerMember.toLocaleString();
+          const atMemberLimit = item.purchaseLimitPerMember !== null && item.memberPurchases >= item.purchaseLimitPerMember;
+          const { row, actions } = actionRow(item.title, item.description + (item.description ? " - " : "") + item.price.toLocaleString() + " " + data.rewards.currencyName + " - " + stock + " - " + memberLimit);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = item.stock === 0 ? "Sold out" : atMemberLimit ? "Limit reached" : "Buy";
+          button.disabled = item.stock === 0 || atMemberLimit;
+          button.addEventListener("click", () =>
+            runAction(button, "store/" + encodeURIComponent(item.id) + "/buy", {}, "Purchase complete.")
+          );
+          actions.append(button);
+          list.append(row);
+        }
+      }
+
+      function renderRaffles() {
+        const list = document.getElementById("raffles-list");
+        list.replaceChildren();
+        if (!data.raffles.length) return list.append(emptyRow("There are no open raffles right now."));
+        for (const raffle of data.raffles) {
+          const detail = raffle.prize + " - " + raffle.entryCost.toLocaleString() + " " + data.rewards.currencyName + " per entry - You have " + raffle.memberEntries.toLocaleString();
+          const { row, actions } = actionRow(raffle.title, detail);
+          const input = document.createElement("input");
+          input.type = "number";
+          input.min = "1";
+          input.max = String(Math.min(100, raffle.maxEntriesPerMember - raffle.memberEntries));
+          input.value = "1";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Enter raffle";
+          button.disabled = raffle.memberEntries >= raffle.maxEntriesPerMember;
+          button.addEventListener("click", () => {
+            const count = Number(input.value);
+            runAction(button, "raffles/" + encodeURIComponent(raffle.id) + "/enter", { count }, "Raffle entry added.");
+          });
+          actions.append(input, button);
+          list.append(row);
+        }
+      }
+
+      function showView(view) {
+        currentView = view;
+        history.replaceState(null, "", "/rewards?view=" + view);
+        for (const name of ["quests", "store", "raffles"]) {
+          document.getElementById(name + "-section").hidden = name !== view;
+          const button = document.querySelector('[data-view="' + name + '"]');
+          button.className = name === view ? "" : "secondary";
+        }
+      }
+
+      async function load() {
+        data = await api("session");
+        document.documentElement.style.setProperty("--accent", data.branding.accentColor);
+        document.getElementById("community-name").textContent = data.branding.name;
+        document.getElementById("balance").textContent = data.balance.toLocaleString() + " " + data.rewards.currencyName;
+        const icon = document.getElementById("currency-icon");
+        icon.src = "/assets/currency/" + data.guildId;
+        icon.onload = () => { icon.hidden = false; };
+        icon.onerror = () => { icon.hidden = true; };
+        renderQuests();
+        renderStore();
+        renderRaffles();
+        showView(currentView);
+        status.className = "status";
+        status.textContent = "Private rewards page is ready";
+        content.hidden = false;
+      }
+
+      async function runAction(button, path, body, successMessage) {
+        button.disabled = true;
+        try {
+          const outcome = await api(path, { method: "POST", body: JSON.stringify(body) });
+          const message = outcome.result === "not_met"
+            ? "That quest requirement has not been met yet."
+            : outcome.result === "already_completed"
+              ? "You already completed that quest."
+              : outcome.result === "no_match"
+                ? "That code did not match an available quest."
+                : successMessage;
+          showResult(message);
+          await load();
+        } catch (error) {
+          showResult(error instanceof Error ? error.message : "This action could not be completed.", true);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      document.querySelectorAll("[data-view]").forEach((button) => {
+        button.addEventListener("click", () => showView(button.dataset.view));
+      });
+
+      if (!token) {
+        status.className = "status problem";
+        status.textContent = "Return to Discord and open this page from the community rewards panel.";
+      } else {
+        load().catch((error) => {
+          status.className = "status problem";
+          status.textContent = error instanceof Error ? error.message : "Community rewards could not be opened.";
+        });
+      }
     </script>`
   );
 }

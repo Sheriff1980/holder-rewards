@@ -10,6 +10,7 @@ export type StoreItem = {
   price: number;
   roleId: string | null;
   stock: number | null;
+  purchaseLimitPerMember: number | null;
   sold: number;
 };
 
@@ -31,6 +32,7 @@ type StoreItemRow = {
   price: number;
   role_id: string | null;
   stock: number | null;
+  purchase_limit_per_member: number | null;
   sold: number | string | null;
 };
 
@@ -45,6 +47,9 @@ function parseStoreItem(row: StoreItemRow): StoreItem | null {
     price: row.price,
     roleId: row.role_id,
     stock: row.stock === null ? null : Number(row.stock),
+    purchaseLimitPerMember: row.purchase_limit_per_member === null
+      ? null
+      : Number(row.purchase_limit_per_member),
     sold: Number.isSafeInteger(sold) ? sold : 0
   };
 }
@@ -53,6 +58,7 @@ export async function listStoreItems(env: Env, guildId: string): Promise<StoreIt
   const rows = await env.DB.prepare(
     `SELECT store_items.id, store_items.guild_id, store_items.title, store_items.description,
        store_items.price, store_items.role_id, store_items.stock,
+       store_items.purchase_limit_per_member,
        COUNT(store_purchases.id) AS sold
      FROM store_items
      LEFT JOIN store_purchases ON store_purchases.item_id = store_items.id
@@ -74,6 +80,7 @@ export async function createStoreItem(
     price: unknown;
     roleId?: unknown;
     stock?: unknown;
+    purchaseLimitPerMember?: unknown;
   }
 ): Promise<StoreItem> {
   if (typeof input.guildId !== "string" || !/^[0-9]{15,22}$/.test(input.guildId)) {
@@ -105,6 +112,18 @@ export async function createStoreItem(
     }
     stock = parsed;
   }
+  let purchaseLimitPerMember: number | null = null;
+  if (
+    input.purchaseLimitPerMember !== undefined &&
+    input.purchaseLimitPerMember !== null &&
+    input.purchaseLimitPerMember !== ""
+  ) {
+    const parsed = Number(input.purchaseLimitPerMember);
+    if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 10_000) {
+      throw new StoreError("Maximum purchases per member must be between 1 and 10,000, or blank for unlimited.");
+    }
+    purchaseLimitPerMember = parsed;
+  }
 
   const id = crypto.randomUUID();
   await env.DB.batch([
@@ -112,11 +131,22 @@ export async function createStoreItem(
       "INSERT INTO guilds (id, updated_at) VALUES (?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
     ).bind(input.guildId),
     env.DB.prepare(
-      `INSERT INTO store_items (id, guild_id, title, description, price, role_id, stock)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, input.guildId, input.title.trim(), description, price, roleId, stock)
+      `INSERT INTO store_items
+        (id, guild_id, title, description, price, role_id, stock, purchase_limit_per_member)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, input.guildId, input.title.trim(), description, price, roleId, stock, purchaseLimitPerMember)
   ]);
-  return { id, guildId: input.guildId, title: input.title.trim(), description, price, roleId, stock, sold: 0 };
+  return {
+    id,
+    guildId: input.guildId,
+    title: input.title.trim(),
+    description,
+    price,
+    roleId,
+    stock,
+    purchaseLimitPerMember,
+    sold: 0
+  };
 }
 
 export async function removeStoreItem(env: Env, guildId: string, itemId: string): Promise<boolean> {
@@ -139,6 +169,17 @@ export async function purchaseStoreItem(
   if (!item) throw new StoreError("That item was not found. Check the item ID from /store list.");
   if (item.stock !== null && item.stock <= 0) {
     throw new StoreError(`${item.title} is sold out.`);
+  }
+  const memberPurchases = await env.DB.prepare(
+    "SELECT COUNT(*) AS purchases FROM store_purchases WHERE item_id = ? AND discord_user_id = ?"
+  )
+    .bind(item.id, input.discordUserId)
+    .first<{ purchases: number | string }>();
+  const purchaseCount = Number(memberPurchases?.purchases ?? 0);
+  if (item.purchaseLimitPerMember !== null && purchaseCount >= item.purchaseLimitPerMember) {
+    throw new StoreError(
+      `You already purchased the maximum of ${item.purchaseLimitPerMember.toLocaleString()} for ${item.title}.`
+    );
   }
   const [balance, settings] = await Promise.all([
     getPointsBalance(env, input.guildId, input.discordUserId),
@@ -220,6 +261,22 @@ export async function purchaseStoreItem(
     roleGranted,
     currencyName: settings.currencyName
   };
+}
+
+export async function listStorePurchaseCountsForMember(
+  env: Env,
+  guildId: string,
+  discordUserId: string
+): Promise<Map<string, number>> {
+  const rows = await env.DB.prepare(
+    `SELECT item_id, COUNT(*) AS purchases
+     FROM store_purchases
+     WHERE guild_id = ? AND discord_user_id = ?
+     GROUP BY item_id`
+  )
+    .bind(guildId, discordUserId)
+    .all<{ item_id: string; purchases: number | string }>();
+  return new Map(rows.results.map((row) => [row.item_id, Number(row.purchases)]));
 }
 
 export async function listRecentPurchases(env: Env, guildId: string): Promise<StorePurchase[]> {

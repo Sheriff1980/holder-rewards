@@ -11,11 +11,24 @@ import {
   removeIndexerConfig,
   saveIndexerConfig
 } from "./indexers.js";
-import { createQuest, listPendingSubmissions, listQuests, QuestError, removeQuest, reviewQuestSubmission } from "./quests.js";
+import {
+  checkQuest,
+  createQuest,
+  listPendingSubmissions,
+  listQuests,
+  listQuestsWithStatus,
+  QuestError,
+  removeQuest,
+  reviewQuestSubmission,
+  submitQuestCode,
+  submitQuestProof
+} from "./quests.js";
 import {
   cancelRaffle,
   createRaffle,
   drawRaffle,
+  enterRaffle,
+  listRaffleEntriesForMember,
   listRaffles,
   RaffleError
 } from "./raffles.js";
@@ -23,6 +36,8 @@ import {
   createStoreItem,
   listRecentPurchases,
   listStoreItems,
+  listStorePurchaseCountsForMember,
+  purchaseStoreItem,
   removeStoreItem,
   StoreError
 } from "./store.js";
@@ -33,7 +48,7 @@ import {
   removeSalesWatch,
   SalesWatchError
 } from "./sales.js";
-import { managerPage, setupPage, verifyPage } from "./html.js";
+import { managerPage, memberRewardsPage, setupPage, verifyPage } from "./html.js";
 import type { DiscordInteraction, Env, RoleSyncQueueMessage } from "./types.js";
 import { AdminError, listManageableDiscordRoles, requireAdminSession } from "./admin.js";
 import {
@@ -56,7 +71,7 @@ import {
 } from "./rules.js";
 import { processRoleSyncQueue, retryFailedRoleSyncs, runScheduledRoleSync } from "./scheduler.js";
 import { pollSalesWatches } from "./sales.js";
-import { getRewardSettings, RewardSettingsError, updateRewardSettings } from "./points.js";
+import { getPointsBalance, getRewardSettings, RewardSettingsError, updateRewardSettings } from "./points.js";
 import {
   AssetError,
   brandLogoUrl,
@@ -77,6 +92,17 @@ import { buildGuildExport, type ExportKind } from "./exports.js";
 import { getWalletPrivacySettings, updateWalletPrivacySettings } from "./privacy.js";
 import { checkChainProviders } from "./health.js";
 import { checkLaunchReadiness } from "./readiness.js";
+import { MemberSessionError, requireMemberSession } from "./member.js";
+import {
+  AnnouncementError,
+  announceQuest,
+  announceRaffle,
+  announceStoreItem,
+  configureQuestChannel,
+  configureRewardsChannel,
+  getQuestChannelSettings,
+  getRewardsChannelSettings
+} from "./announcements.js";
 
 const securityHeaders = {
   "Content-Security-Policy":
@@ -99,6 +125,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   return Response.json(body, {
     status,
     headers: securityHeaders
+  });
+}
+
+function privateJsonResponse(body: unknown, status = 200): Response {
+  return Response.json(body, {
+    status,
+    headers: { ...securityHeaders, "Cache-Control": "private, no-store" }
   });
 }
 
@@ -136,6 +169,84 @@ function hasSetupAccess(request: Request, env: Env): boolean {
 function bearerToken(request: Request): string {
   const authorization = request.headers.get("Authorization");
   return authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+}
+
+async function memberApiResponse(request: Request, env: Env, path: string): Promise<Response> {
+  try {
+    const session = await requireMemberSession(env, bearerToken(request));
+
+    if (request.method === "GET" && path === "session") {
+      const [branding, rewards, balance, quests, raffles, entries, storeItems, storePurchases] = await Promise.all([
+        getGuildBranding(env, session.guild_id),
+        getRewardSettings(env, session.guild_id),
+        getPointsBalance(env, session.guild_id, session.discord_user_id),
+        listQuestsWithStatus(env, session.guild_id, session.discord_user_id),
+        listRaffles(env, session.guild_id),
+        listRaffleEntriesForMember(env, session.guild_id, session.discord_user_id),
+        listStoreItems(env, session.guild_id),
+        listStorePurchaseCountsForMember(env, session.guild_id, session.discord_user_id)
+      ]);
+      return privateJsonResponse({
+        guildId: session.guild_id,
+        branding,
+        rewards,
+        balance,
+        quests,
+        raffles: raffles
+          .filter((raffle) => raffle.status === "open")
+          .map((raffle) => ({ ...raffle, memberEntries: entries.get(raffle.id) ?? 0 })),
+        storeItems: storeItems.map((item) => ({
+          ...item,
+          memberPurchases: storePurchases.get(item.id) ?? 0
+        }))
+      });
+    }
+
+    if (request.method === "POST" && path.startsWith("quests/") && path.endsWith("/check")) {
+      const questId = path.slice("quests/".length, -"/check".length);
+      return privateJsonResponse(await checkQuest(env, session.guild_id, questId, session.discord_user_id));
+    }
+
+    if (request.method === "POST" && path === "quests/code") {
+      const input = (await request.json()) as Record<string, unknown>;
+      return privateJsonResponse(await submitQuestCode(env, session.guild_id, session.discord_user_id, input.code));
+    }
+
+    if (request.method === "POST" && path.startsWith("quests/") && path.endsWith("/proof")) {
+      const questId = path.slice("quests/".length, -"/proof".length);
+      const input = (await request.json()) as Record<string, unknown>;
+      return privateJsonResponse(await submitQuestProof(env, session.guild_id, questId, session.discord_user_id, input.proof));
+    }
+
+    if (request.method === "POST" && path.startsWith("raffles/") && path.endsWith("/enter")) {
+      const raffleId = path.slice("raffles/".length, -"/enter".length);
+      const input = (await request.json()) as Record<string, unknown>;
+      return privateJsonResponse(await enterRaffle(env, {
+        guildId: session.guild_id,
+        raffleId,
+        discordUserId: session.discord_user_id,
+        count: input.count
+      }));
+    }
+
+    if (request.method === "POST" && path.startsWith("store/") && path.endsWith("/buy")) {
+      const itemId = path.slice("store/".length, -"/buy".length);
+      return privateJsonResponse(await purchaseStoreItem(env, {
+        guildId: session.guild_id,
+        itemId,
+        discordUserId: session.discord_user_id
+      }));
+    }
+  } catch (error) {
+    if (error instanceof MemberSessionError) return privateJsonResponse({ error: error.message }, error.status);
+    if (error instanceof QuestError || error instanceof RaffleError || error instanceof StoreError) {
+      return privateJsonResponse({ error: error.message }, 400);
+    }
+    if (error instanceof SyntaxError) return privateJsonResponse({ error: "Request body must be valid JSON." }, 400);
+    console.error("Member rewards request failed", { method: request.method, path, error });
+    return privateJsonResponse({ error: "Community rewards are temporarily unavailable." }, 503);
+  }
+  return privateJsonResponse({ error: "Not found" }, 404);
 }
 
 async function healthResponse(env: Env): Promise<Response> {
@@ -293,7 +404,7 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
   try {
     const session = await requireAdminSession(env, bearerToken(request));
     if (request.method === "GET" && path === "session") {
-      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, queue, hasIcon, hasLogo] = await Promise.all([
+      const [chains, roles, rules, rewards, branding, operations, privacy, indexers, quests, raffles, storeItems, recentPurchases, pendingSubmissions, salesWatches, channels, rewardsChannel, questChannel, queue, hasIcon, hasLogo] = await Promise.all([
         listChains(env, { includeDemo: true }),
         listManageableDiscordRoles(env, session.guild_id),
         listRoleRules(env, session.guild_id),
@@ -309,6 +420,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         listPendingSubmissions(env, session.guild_id),
         listSalesWatches(env, session.guild_id),
         listTextChannels(env, session.guild_id).catch(() => []),
+        getRewardsChannelSettings(env, session.guild_id),
+        getQuestChannelSettings(env, session.guild_id),
         env.DB.prepare("SELECT value FROM app_state WHERE key = 'last_queue_run'")
           .first<{ value: string }>()
           .then((row) => ({ enabled: Boolean(env.ROLE_SYNC_QUEUE), lastRunAt: row?.value ?? null })),
@@ -332,6 +445,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         pendingSubmissions,
         salesWatches,
         channels,
+        rewardsChannel,
+        questChannel,
         queue,
         currencyIconUrl: hasIcon
           ? `${currencyIconUrl(new URL(request.url).origin, session.guild_id)}?v=${Date.now()}`
@@ -349,6 +464,42 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         checkedAt: new Date().toISOString(),
         providers
       });
+    }
+
+    if (request.method === "POST" && path === "rewards-channel") {
+      const input = (await request.json()) as Record<string, unknown>;
+      if (typeof input.channelId !== "string") {
+        return jsonResponse({ error: "Choose a Discord channel for store and raffle posts." }, 400);
+      }
+      const channels = await listTextChannels(env, session.guild_id);
+      if (!channels.some((channel) => channel.id === input.channelId)) {
+        return jsonResponse({ error: "Choose a text channel from this Discord server." }, 400);
+      }
+      const rewardsChannel = await configureRewardsChannel(
+        env,
+        session.guild_id,
+        input.channelId,
+        new URL(request.url).origin
+      );
+      return jsonResponse({ ok: true, rewardsChannel });
+    }
+
+    if (request.method === "POST" && path === "quest-channel") {
+      const input = (await request.json()) as Record<string, unknown>;
+      if (typeof input.channelId !== "string") {
+        return jsonResponse({ error: "Choose a Discord channel for quest posts." }, 400);
+      }
+      const channels = await listTextChannels(env, session.guild_id);
+      if (!channels.some((channel) => channel.id === input.channelId)) {
+        return jsonResponse({ error: "Choose a text channel from this Discord server." }, 400);
+      }
+      const questChannel = await configureQuestChannel(
+        env,
+        session.guild_id,
+        input.channelId,
+        new URL(request.url).origin
+      );
+      return jsonResponse({ ok: true, questChannel });
     }
 
     if (request.method === "POST" && path === "retry-sync-problems") {
@@ -648,7 +799,19 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         action: "quest_created",
         detail: `Quest "${quest.title}" (${quest.kind}, ${quest.reward} points)`
       });
-      return jsonResponse({ ok: true, quest }, 201);
+      let announcementWarning: string | null = null;
+      let announcementPosted = false;
+      try {
+        announcementPosted = await announceQuest(
+          env,
+          session.guild_id,
+          new URL(request.url).origin,
+          quest
+        );
+      } catch (error) {
+        announcementWarning = error instanceof Error ? error.message : "The quest announcement could not be posted.";
+      }
+      return jsonResponse({ ok: true, quest, announcementPosted, announcementWarning }, 201);
     }
 
     if (request.method === "DELETE" && path.startsWith("quests/")) {
@@ -713,7 +876,14 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         action: "raffle_created",
         detail: `Raffle "${raffle.title}" (${raffle.entryCost} points per entry)`
       });
-      return jsonResponse({ ok: true, raffle }, 201);
+      let announcementWarning: string | null = null;
+      let announcementPosted = false;
+      try {
+        announcementPosted = await announceRaffle(env, session.guild_id, new URL(request.url).origin, raffle);
+      } catch (error) {
+        announcementWarning = error instanceof Error ? error.message : "The raffle announcement could not be posted.";
+      }
+      return jsonResponse({ ok: true, raffle, announcementPosted, announcementWarning }, 201);
     }
 
     if (request.method === "POST" && path.startsWith("raffles/") && path.endsWith("/draw")) {
@@ -754,7 +924,8 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         description: input.description,
         price: input.price,
         roleId: input.roleId,
-        stock: input.stock
+        stock: input.stock,
+        purchaseLimitPerMember: input.purchaseLimitPerMember
       });
       await recordAuditEvent(env, {
         guildId: session.guild_id,
@@ -762,7 +933,14 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
         action: "store_item_created",
         detail: `Store item "${item.title}" (${item.price} points)`
       });
-      return jsonResponse({ ok: true, item }, 201);
+      let announcementWarning: string | null = null;
+      let announcementPosted = false;
+      try {
+        announcementPosted = await announceStoreItem(env, session.guild_id, new URL(request.url).origin, item);
+      } catch (error) {
+        announcementWarning = error instanceof Error ? error.message : "The store announcement could not be posted.";
+      }
+      return jsonResponse({ ok: true, item, announcementPosted, announcementWarning }, 201);
     }
 
     if (request.method === "DELETE" && path.startsWith("store-items/")) {
@@ -838,6 +1016,9 @@ async function managerApiResponse(request: Request, env: Env, path: string): Pro
     if (error instanceof SalesWatchError) {
       return jsonResponse({ error: error.message }, 400);
     }
+    if (error instanceof AnnouncementError) {
+      return jsonResponse({ error: error.message }, 400);
+    }
     if (error instanceof SyntaxError) {
       return jsonResponse({ error: "Request body must be valid JSON." }, 400);
     }
@@ -906,6 +1087,10 @@ export async function handleRequest(
     return htmlResponse(verifyPage(env, request.url));
   }
 
+  if (request.method === "GET" && url.pathname === "/rewards") {
+    return htmlResponse(memberRewardsPage(env));
+  }
+
   if (request.method === "GET" && url.pathname === "/manage") {
     return htmlResponse(managerPage(env));
   }
@@ -936,6 +1121,10 @@ export async function handleRequest(
 
   if (url.pathname.startsWith("/api/admin/")) {
     return managerApiResponse(request, env, url.pathname.slice("/api/admin/".length));
+  }
+
+  if (url.pathname.startsWith("/api/member/")) {
+    return memberApiResponse(request, env, url.pathname.slice("/api/member/".length));
   }
 
   return jsonResponse({ error: "Not found" }, 404);

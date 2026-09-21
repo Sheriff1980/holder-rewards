@@ -1055,6 +1055,9 @@ export async function syncMemberRoles(
       summary.qualified.push(roleId);
     }
     if (decision === "error") {
+      if (hasRole) {
+        summary.unchanged.push(roleId);
+      }
       summary.errors.push({ roleId, message: "Ownership could not be checked; the existing role was left unchanged." });
       continue;
     }
